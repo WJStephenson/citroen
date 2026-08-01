@@ -141,6 +141,40 @@ button {
   color: var(--accent);
 }
 
+/* ---------- car hero ---------- */
+
+.car-hero {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0.25rem 0 0.5rem;
+}
+
+/*
+ * A soft light behind the car rather than a shadow beneath it. On a #121212
+ * surface a drop shadow is invisible; lifting the background is what actually
+ * seats the car in the page.
+ */
+.car-hero::before {
+  content: '';
+  position: absolute;
+  inset: -6% -10%;
+  background: radial-gradient(58% 62% at 50% 52%, rgb(255 255 255 / 7%), transparent 72%);
+  pointer-events: none;
+}
+
+.car-hero-img {
+  position: relative;
+  /*
+   * Capped near the asset's native 308px. The source is a 308×165 render, so
+   * displaying it much larger is upscaling and goes soft on a high-DPI phone.
+   */
+  width: min(74%, 272px);
+  height: auto;
+  filter: drop-shadow(0 10px 14px rgb(0 0 0 / 55%));
+  user-select: none;
+}
+
 /* ---------- battery ring ---------- */
 
 .ring {
@@ -150,8 +184,10 @@ button {
   margin: 0.5rem 0 0.25rem;
 }
 
+/* Slightly smaller than before, to make room for the car above it without
+   pushing the status strip off the first screen. */
 .ring svg {
-  width: min(70vw, 260px);
+  width: min(62vw, 232px);
   height: auto;
   display: block;
 }

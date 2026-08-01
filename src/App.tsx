@@ -6,6 +6,7 @@ import { FindCarCard } from './components/FindCarCard'
 import { RefreshIcon, SettingsIcon } from './components/Icons'
 import { ChargeWindowCard } from './components/ChargeWindowCard'
 import { ChargingHistoryCard } from './components/ChargingHistoryCard'
+import { CarHero } from './components/CarHero'
 import { PreconditionCard } from './components/PreconditionCard'
 import { SettingsSheet } from './components/SettingsSheet'
 import { StatusStrip } from './components/StatusStrip'
@@ -122,6 +123,7 @@ export default function App() {
           </div>
         ) : vehicle.state ? (
           <>
+            <CarHero />
             <BatteryRing
               level={vehicle.state.battery}
               range={vehicle.state.range}

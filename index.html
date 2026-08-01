@@ -9,8 +9,16 @@
     <title>ë-C4</title>
     <meta name="description" content="Remote control for the Citroën ë-C4" />
 
-    <!-- Android home-screen install + standalone chrome -->
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!--
+      Android home-screen install + standalone chrome.
+
+      crossorigin="use-credentials" is REQUIRED here, not optional. Browsers
+      fetch the manifest with credentials mode "omit" by default — even
+      same-origin — so behind Cloudflare Access the request is bounced to the
+      login page, the manifest never parses, and Android falls back to a
+      generic icon. This attribute makes the fetch send the Access cookie.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <meta name="theme-color" content="#121212" />
     <meta name="color-scheme" content="dark" />
     <meta name="mobile-web-app-capable" content="yes" />

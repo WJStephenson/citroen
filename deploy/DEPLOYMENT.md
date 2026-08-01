@@ -188,3 +188,35 @@ app lock.
 | Commands time out after ~2 min | Normal if the car is in deep sleep and unreachable; otherwise check the bridge logs |
 | Frequent OAuth logouts | The bridge is behind a VPN. Take it off Gluetun — Stellantis drops sessions on IP hops |
 | App updates don't appear | `sw.js` or `index.html` being cached upstream. The provided config sets `no-cache`; also purge the Cloudflare cache |
+| Home-screen icon is a generic globe / screenshot | See below — the manifest is failing to load behind Access |
+
+## The icon doesn't appear on the home screen
+
+Browsers fetch the web app manifest with credentials mode **omit** by default,
+*even same-origin*. Behind Cloudflare Access that unauthenticated request gets
+redirected to the login page, the manifest never parses, and Android falls back
+to a generic icon.
+
+`index.html` therefore carries:
+
+```html
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+```
+
+If the icon is still wrong after deploying a build that includes it:
+
+1. **Reinstall the app.** The manifest is read at install time, so an app
+   installed before the fix keeps the old icon forever. On Android: long-press
+   the icon → Uninstall, then in Chrome → ⋮ → Settings → Site settings → All
+   sites → your hostname → *Clear & reset*, then reinstall.
+2. **Check the files are actually served**, authenticated:
+   ```bash
+   curl -I https://<your-host>/manifest.webmanifest
+   curl -I https://<your-host>/icons/icon-192.png
+   ```
+   Both should be `200`. A `302` to a Cloudflare login URL means Access is
+   intercepting them.
+3. **If they still 302**, add a Cloudflare Access *Bypass* policy for the paths
+   `/manifest.webmanifest` and `/icons/*`. Neither contains anything sensitive —
+   they are a name, some colours, and a picture of a battery — so exempting them
+   costs nothing and leaves every `/api/*` route protected.

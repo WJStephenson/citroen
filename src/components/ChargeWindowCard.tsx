@@ -1,5 +1,10 @@
 import { useState } from 'react'
-import { setChargeStartHour, setChargeStopHour } from '../api/client'
+import {
+  clearChargeStartHour,
+  clearChargeStopHour,
+  setChargeStartHour,
+  setChargeStopHour,
+} from '../api/client'
 import type { Commands } from '../hooks/useCommands'
 
 const LS_START = 'ec4.chargeStart'
@@ -15,6 +20,12 @@ const LS_STOP = 'ec4.chargeStop'
  * They can therefore fail independently, so each has its own Set button rather
  * than one button that half-works. The stop hour needs charge control
  * configured in PSACC for this VIN; the start hour does not.
+ *
+ * Clearing them works differently too, for the same reason:
+ *   - Stop is cleared with the [0, 0] sentinel the bridge reads as "disabled".
+ *   - Start has no "unset". The car always holds an hour; what changes is
+ *     whether it charges immediately or waits, so clearing means switching to
+ *     immediate charging.
  */
 export function ChargeWindowCard({ commands }: { commands: Commands }) {
   const [start, setStart] = useState(() => localStorage.getItem(LS_START) ?? '00:30')
@@ -29,6 +40,9 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
     if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) return null
     return [h, m]
   }
+
+  // 00:00 reaches the bridge as "disable", never as midnight.
+  const stopIsMidnight = stop === '00:00'
 
   const applyStart = () => {
     const parsed = parse(start)
@@ -50,15 +64,44 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
     if (!parsed) return
     void commands.run({
       kind: 'chargeStop',
-      label: `Setting charge stop to ${stop}`,
+      label: stopIsMidnight ? 'Clearing stop time' : `Setting charge stop to ${stop}`,
       send: async () => {
         const result = await setChargeStopHour(parsed[0], parsed[1])
-        localStorage.setItem(LS_STOP, stop)
-        setSavedStop(stop)
+        if (stopIsMidnight) {
+          localStorage.removeItem(LS_STOP)
+          setSavedStop(null)
+        } else {
+          localStorage.setItem(LS_STOP, stop)
+          setSavedStop(stop)
+        }
         return result
       },
     })
   }
+
+  const clearStart = () =>
+    void commands.run({
+      kind: 'chargeNow',
+      label: 'Switching to immediate charging',
+      send: async () => {
+        const result = await clearChargeStartHour()
+        localStorage.removeItem(LS_START)
+        setSavedStart(null)
+        return result
+      },
+    })
+
+  const clearStop = () =>
+    void commands.run({
+      kind: 'chargeStop',
+      label: 'Clearing stop time',
+      send: async () => {
+        const result = await clearChargeStopHour()
+        localStorage.removeItem(LS_STOP)
+        setSavedStop(null)
+        return result
+      },
+    })
 
   const window =
     savedStart && savedStop
@@ -122,15 +165,30 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
           type="button"
           className={`button ${commands.active?.kind === 'chargeStop' ? 'is-busy' : ''}`}
           onClick={applyStop}
-          disabled={disabled || stop === savedStop}
+          disabled={disabled || (stop === savedStop && !stopIsMidnight)}
         >
-          Set
+          {stopIsMidnight ? 'Clear' : 'Set'}
+        </button>
+      </div>
+
+      <div className="row">
+        <button
+          type="button"
+          className={`button ${commands.active?.kind === 'chargeNow' ? 'is-busy' : ''}`}
+          onClick={clearStart}
+          disabled={disabled}
+        >
+          Charge now
+        </button>
+        <button type="button" className="button" onClick={clearStop} disabled={disabled || !savedStop}>
+          Clear stop
         </button>
       </div>
 
       <p className="card-note">
-        Start is a command to the car. Stop is enforced by psa_car_controller itself, so it needs
-        charge control configured for this VIN.
+        Start is a command to the car; “Charge now” cancels it by switching to immediate charging.
+        Stop is enforced by psa_car_controller itself, so it needs charge control configured for
+        this VIN — and 00:00 clears it rather than meaning midnight.
       </p>
     </section>
   )

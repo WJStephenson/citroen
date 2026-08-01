@@ -42,9 +42,19 @@ export const endpoints = {
   /**
    * The hour charging should STOP. Same local charge-control mechanism as the
    * percentage threshold, so it carries the same "VIN not in list" caveat.
+   *
+   * NOTE: ChargeControl.set_stop_hour treats [0, 0] as "disabled", so 00:00
+   * cannot be set as a stop time — it clears the stop hour instead. See
+   * clearChargeStopHour below.
    */
   chargeStop: (vin: string, hour: number, minute: number) =>
     `/charge_control?vin=${encodeURIComponent(vin)}&hour=${hour}&minute=${minute}`,
+  /**
+   * Charge type: immediate (1) or delayed (0). Immediate is how a deferred
+   * start is cancelled — the car keeps the stored hour but stops honouring it.
+   */
+  chargeNow: (vin: string, now: boolean) =>
+    `/charge_now/${encodeURIComponent(vin)}/${now ? 1 : 0}`,
 } as const
 
 async function request<T>(path: string, timeoutMs: number): Promise<T> {
@@ -226,5 +236,25 @@ export function setChargeStartHour(hour: number, minute: number): Promise<Comman
 export function setChargeStopHour(hour: number, minute: number): Promise<CommandResult> {
   const h = clampHour(hour)
   const m = clampMinute(minute)
+  // [0, 0] is the bridge's "disabled" sentinel, so it cannot mean midnight.
+  if (h === 0 && m === 0) return clearChargeStopHour()
   return command(endpoints.chargeStop(requireVin(), h, m), `Charging stops at ${hhmm(h, m)}`)
+}
+
+/** Sends the [0, 0] sentinel that ChargeControl.set_stop_hour reads as "off". */
+export function clearChargeStopHour(): Promise<CommandResult> {
+  return command(endpoints.chargeStop(requireVin(), 0, 0), 'Stop time cleared')
+}
+
+/**
+ * Cancels a deferred start by switching the car to immediate charging. The
+ * stored hour stays in the car; it simply stops being honoured.
+ */
+export function clearChargeStartHour(): Promise<CommandResult> {
+  return command(endpoints.chargeNow(requireVin(), true), 'Charging immediately')
+}
+
+/** Puts the car back on its stored delayed-charge hour. */
+export function resumeDelayedCharge(): Promise<CommandResult> {
+  return command(endpoints.chargeNow(requireVin(), false), 'Delayed charging resumed')
 }

@@ -48,6 +48,7 @@ state = {
     "charge_threshold": 100,
     "stop_hour": "08:00",
     "start_hour": "00:30",
+    "charge_type": "Delayed",
     "updated_at": datetime.now(timezone.utc),
 }
 lock = threading.Lock()
@@ -185,7 +186,10 @@ class Handler(BaseHTTPRequestHandler):
                 if "percentage" in query:
                     state["charge_threshold"] = int(query["percentage"][0])
                 if "hour" in query and "minute" in query:
-                    state["stop_hour"] = f"{int(query['hour'][0]):02d}:{int(query['minute'][0]):02d}"
+                    h, m = int(query["hour"][0]), int(query["minute"][0])
+                    # ChargeControl.set_stop_hour treats [0, 0] as "disabled",
+                    # so midnight is not a settable stop time.
+                    state["stop_hour"] = None if (h, m) == (0, 0) else f"{h:02d}:{m:02d}"
                 config = {
                     "vin": query["vin"][0],
                     "percentage_threshold": state["charge_threshold"],
@@ -215,12 +219,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"result": "ok"})
             return
 
+        # Charge type: 1 = immediate (cancels the deferred start), 0 = delayed.
+        # The car keeps its stored hour either way; only the type changes.
         if parts[0] == "charge_now" and len(parts) == 3:
             time.sleep(wake_delay())
+            immediate = parts[2] == "1"
             with lock:
-                state["charging_status"] = "InProgress" if parts[2] == "1" else "Stopped"
+                state["charge_type"] = "Immediate" if immediate else "Delayed"
+                if immediate:
+                    state["charging_status"] = "InProgress"
                 state["updated_at"] = datetime.now(timezone.utc)
-            self._send(200, {"result": "ok"})
+            self._send(200, {"result": "ok", "type": state["charge_type"]})
             return
 
         if parts[:2] == ["battery", "soh"]:

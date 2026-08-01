@@ -25,7 +25,9 @@ only — you already have the domain, tunnel, and nginx container.
   control (needs it configured for your VIN — see below).
 - **Charging window** — separate start and stop times, so the car only charges
   inside your off-peak tariff window. These are two unrelated mechanisms in the
-  bridge and can fail independently, so each has its own Set button.
+  bridge and can fail independently, so each has its own Set button. Both can be
+  cleared: *Charge now* cancels a deferred start, *Clear stop* removes the stop
+  time.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
 - **Pull-to-refresh** — the primary way to get live state, because background
   polling is deliberately throttled (see [Battery safety](#battery-safety)).
@@ -222,6 +224,18 @@ So the stop time only works while the bridge is running and configured, whereas
 the start time survives in the car itself. The UI sets them independently for
 that reason.
 
+**Clearing them is asymmetric, and one case is a trap:**
+
+- **Stop** is cleared by sending `hour=0&minute=0`. `ChargeControl.set_stop_hour`
+  treats `[0, 0]` as "disabled", so **00:00 cannot be set as a stop time** — it
+  clears instead. The client routes 00:00 to the clear path deliberately, and
+  the card's button relabels itself to `Clear`, so the UI never claims to have
+  set a midnight stop that the bridge silently discarded.
+- **Start** has no "unset" at all. The car always holds an hour; what changes is
+  the *charge type*. `/charge_now/{VIN}/1` sends `IMMEDIATE_CHARGE`, which makes
+  the car ignore the stored hour — that is what "Charge now" does.
+  `/charge_now/{VIN}/0` puts it back on `DELAYED_CHARGE` at the stored hour.
+
 ### Pre-conditioning is on/off only
 
 There is no temperature setpoint anywhere in the chain — `RemoteClient` exposes
@@ -249,7 +263,7 @@ Two behaviours worth knowing:
 
 ### Endpoints available but not surfaced in the UI
 
-The bridge also exposes `/wakeup/{VIN}`, `/charge_now/{VIN}/{0|1}`,
+The bridge also exposes `/wakeup/{VIN}`,
 `/lock_door/{VIN}/{0|1}`, `/horn/{VIN}/{count}`, `/lights/{VIN}/{duration}`,
 `/battery/soh/{VIN}`, `/position/{VIN}`, `/get_vehicles`, `/vehicles/trips` and
 `/vehicles/chargings`. These are outside the design doc's scope, so the UI does

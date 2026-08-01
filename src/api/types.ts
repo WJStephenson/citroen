@@ -74,7 +74,12 @@ export interface VehicleState {
   reportedAt: Date | null
 }
 
-export type CommandKind = 'precondition' | 'chargeLimit' | 'chargeStart' | 'chargeStop'
+export type CommandKind =
+  | 'precondition'
+  | 'chargeLimit'
+  | 'chargeStart'
+  | 'chargeStop'
+  | 'chargeNow'
 
 export interface CommandResult {
   ok: boolean

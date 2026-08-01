@@ -1,7 +1,7 @@
 import carImage from '../assets/ec4.webp'
 
 /**
- * The car itself, above the battery ring.
+ * The car itself, above the battery bar.
  *
  * Imported through Vite rather than dropped in public/, so it lands in
  * /assets/ with a content hash — which means the service worker's immutable

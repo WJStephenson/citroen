@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BatteryRing } from './components/BatteryRing'
+import { BatteryBar } from './components/BatteryBar'
 import { ChargeLimitCard } from './components/ChargeLimitCard'
 import { CommandOverlay } from './components/CommandOverlay'
 import { FindCarCard } from './components/FindCarCard'
@@ -117,14 +117,13 @@ export default function App() {
       <main className="content">
         {vehicle.loading && !vehicle.state ? (
           <div className="skeleton" aria-label="Loading vehicle state">
-            <div className="skeleton-ring" />
-            <div className="skeleton-line" />
-            <div className="skeleton-line is-short" />
+            <div className="skeleton-car" />
+            <div className="skeleton-bar" />
           </div>
         ) : vehicle.state ? (
           <>
             <CarHero />
-            <BatteryRing
+            <BatteryBar
               level={vehicle.state.battery}
               range={vehicle.state.range}
               charging={vehicle.state.charging}

@@ -16,9 +16,11 @@
 import { API_BASE, COMMAND_TIMEOUT_MS, READ_TIMEOUT_MS, getVin } from '../config'
 import {
   ApiError,
+  type ChargingSession,
   type ChargingStatus,
   type CommandResult,
   type PreconditioningStatus,
+  type RawChargingSession,
   type RawVehicleInfo,
   type VehicleState,
 } from './types'
@@ -266,6 +268,39 @@ export function clearChargeStartHour(): Promise<CommandResult> {
 /** Puts the car back on its stored delayed-charge hour. */
 export function resumeDelayedCharge(): Promise<CommandResult> {
   return command(endpoints.chargeNow(requireVin(), false), 'Delayed charging resumed')
+}
+
+/**
+ * PSACC's `kw` field is energy in kWh, not power:
+ *   consumption_kw = (level - last_charge.start_level) / 100 * car.battery_power
+ * Renaming it here so nothing downstream plots it as kilowatts.
+ */
+export function normaliseSession(raw: RawChargingSession): ChargingSession {
+  const started = raw.start_at ? new Date(raw.start_at) : null
+  return {
+    startedAt: started && !Number.isNaN(started.getTime()) ? started : null,
+    energy: num(raw.kw),
+    startLevel: num(raw.start_level),
+    endLevel: num(raw.end_level),
+    durationMinutes: num(raw.duration_min),
+    mode: raw.charging_mode ?? null,
+    price: num(raw.price),
+  }
+}
+
+/**
+ * Charging history. This reads psa_car_controller's own database and never
+ * touches the car, so it is free to call whenever.
+ *
+ * The bridge returns [] rather than an error when it has too little data yet.
+ */
+export async function fetchChargingSessions(): Promise<ChargingSession[]> {
+  const raw = await request<RawChargingSession[]>(endpoints.chargings(), READ_TIMEOUT_MS)
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map(normaliseSession)
+    .filter((session) => session.startedAt !== null)
+    .sort((a, b) => (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0))
 }
 
 export function soundHorn(count = 1): Promise<CommandResult> {

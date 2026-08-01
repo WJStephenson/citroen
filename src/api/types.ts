@@ -74,6 +74,34 @@ export interface VehicleState {
   reportedAt: Date | null
 }
 
+/** One completed charging session, as Charging.get_chargings() returns it. */
+export interface RawChargingSession {
+  start_at?: string
+  stop_at?: string
+  start_level?: number
+  end_level?: number
+  charging_mode?: string
+  vin?: string
+  mileage?: number
+  price?: number
+  /** Energy in kWh, despite the name — see normaliseSession. */
+  kw?: number
+  co2?: number
+  duration_min?: number
+  duration_str?: string
+}
+
+export interface ChargingSession {
+  startedAt: Date | null
+  /** Energy added, kWh. */
+  energy: number | null
+  startLevel: number | null
+  endLevel: number | null
+  durationMinutes: number | null
+  mode: string | null
+  price: number | null
+}
+
 export type CommandKind =
   | 'precondition'
   | 'chargeLimit'

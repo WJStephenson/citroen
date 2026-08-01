@@ -28,6 +28,10 @@ only — you already have the domain, tunnel, and nginx container.
   bridge and can fail independently, so each has its own Set button. Both can be
   cleared: *Charge now* cancels a deferred start, *Clear stop* removes the stop
   time.
+- **Find the car** — flash the lights or sound the horn (the horn asks for a
+  second tap).
+- **Charging history** — energy added per session, charted from
+  `/vehicles/chargings`, with a table view.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
 - **Pull-to-refresh** — the primary way to get live state, because background
   polling is deliberately throttled (see [Battery safety](#battery-safety)).
@@ -186,6 +190,7 @@ src/
 ├── lock/              WebAuthn / PIN local lock
 ├── units.ts           km/mi and °C/°F conversion; display only
 └── components/        presentational; none of them touch a Raw type
+    └── ChargingHistoryCard.tsx   hand-rolled SVG chart, no chart library
 public/sw.js           cache-first shell, network-only /api/*
 ```
 
@@ -261,6 +266,21 @@ Two behaviours worth knowing:
   more than the poll interval for 12V battery drain — a cached poll costs the
   car nothing at all.
 
+### The charging curve is not available, and `kw` is not kilowatts
+
+Two traps in the charging data:
+
+- **`kw` is energy in kWh, not power.** PSACC computes it as
+  `(level - start_level) / 100 * car.battery_power`, so the name is misleading.
+  The client renames it to `energy` on the way in, so nothing downstream can
+  plot it as kilowatts.
+- **The speed-vs-SoC curve has no HTTP route.** `BatteryChargeCurve` is just
+  `{level, speed}` and psa_car_controller does record it, but
+  `Charging.get_battery_curve()` reads its SQLite database directly and no
+  endpoint returns it. `/vehicles/chargings` gives completed *sessions*, not the
+  shape of the charge. Getting the real curve into this app would mean adding a
+  route to the bridge.
+
 ### Endpoints available but not surfaced in the UI
 
 The bridge also exposes `/wakeup/{VIN}`,
@@ -301,9 +321,14 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   conversion in both directions.
 - The full React tree was mounted in jsdom against the mock and asserted on the
   rendered DOM: battery ring, range, charging state with remaining time, cabin
-  temperature, odometer, 12V voltage, and all three command cards, with no
-  React warnings or errors. Switching to miles/°F — including via a change made
-  in another tab — re-renders every value live.
+  temperature, odometer, 12V voltage, and every command card, with no React
+  warnings or errors. Switching to miles/°F — including via a change made in
+  another tab — re-renders every value live.
+- The chart's series colour was checked with a palette validator against the
+  card surface, not chosen by eye: the UI mint (`#3ddc97`) sits at OKLCH L 0.797,
+  outside the 0.48–0.67 dark-mode band, so the chart uses `#30ae77` — the same
+  hue, one validated step darker. The generated SVG was rasterised and inspected
+  for label collisions and overflow.
 
 Not verified: real-device install and the WebAuthn lock (both need a real
 browser on HTTPS), the nginx config against a live psa_car_controller, and the

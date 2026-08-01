@@ -135,10 +135,13 @@ def charging_sessions() -> list:
                 "vin": VIN,
                 "mileage": round(14732.4 - i * 180, 1),
                 "price": round(kwh * 0.075, 2),
-                "kw": round(kwh / hours, 2),
+                # PSACC's "kw" is energy in kWh, not power, despite the name:
+                # (level - start_level) / 100 * car.battery_power
+                "kw": round(kwh, 2),
                 "co2": round(kwh * 0.021, 2),
                 "duration_min": round(hours * 60, 1),
-                "duration_str": f"{int(hours)}h{int((hours % 1) * 60):02d}",
+                # Real code uses str(timedelta), e.g. "6:30:00".
+                "duration_str": str(timedelta(hours=hours)),
             }
         )
     return sessions

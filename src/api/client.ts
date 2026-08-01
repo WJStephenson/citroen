@@ -55,6 +55,10 @@ export const endpoints = {
    */
   chargeNow: (vin: string, now: boolean) =>
     `/charge_now/${encodeURIComponent(vin)}/${now ? 1 : 0}`,
+  horn: (vin: string, count: number) => `/horn/${encodeURIComponent(vin)}/${count}`,
+  /** Duration is accepted but the car runs the lights for ~10s regardless. */
+  lights: (vin: string, seconds: number) => `/lights/${encodeURIComponent(vin)}/${seconds}`,
+  chargings: () => '/vehicles/chargings',
 } as const
 
 async function request<T>(path: string, timeoutMs: number): Promise<T> {
@@ -196,12 +200,17 @@ async function command(path: string, success: string): Promise<CommandResult> {
   // success for a command that did nothing.
   if (body && typeof body === 'object' && 'error' in body) {
     const message = String((body as { error: unknown }).error)
-    throw new ApiError(
-      message === 'VIN not in list'
-        ? 'Charge control is not set up in psa_car_controller for this VIN.'
-        : message,
-      200,
-    )
+    if (message === 'VIN not in list') {
+      throw new ApiError(
+        'Charge control is not set up in psa_car_controller for this VIN.',
+        200,
+      )
+    }
+    // horn / lights / wakeup / lock_door all report throttling this way.
+    if (/rate limit/i.test(message)) {
+      throw new ApiError('Rate limited by the bridge — wait a moment and retry.', 200, 'server')
+    }
+    throw new ApiError(message, 200)
   }
 
   return { ok: true, message: success }
@@ -257,4 +266,13 @@ export function clearChargeStartHour(): Promise<CommandResult> {
 /** Puts the car back on its stored delayed-charge hour. */
 export function resumeDelayedCharge(): Promise<CommandResult> {
   return command(endpoints.chargeNow(requireVin(), false), 'Delayed charging resumed')
+}
+
+export function soundHorn(count = 1): Promise<CommandResult> {
+  const times = Math.min(5, Math.max(1, Math.round(count)))
+  return command(endpoints.horn(requireVin(), times), 'Horn sounded')
+}
+
+export function flashLights(seconds = 10): Promise<CommandResult> {
+  return command(endpoints.lights(requireVin(), seconds), 'Lights flashed')
 }

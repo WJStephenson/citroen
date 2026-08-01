@@ -184,12 +184,6 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
           Clear stop
         </button>
       </div>
-
-      <p className="card-note">
-        Start is a command to the car; “Charge now” cancels it by switching to immediate charging.
-        Stop is enforced by psa_car_controller itself, so it needs charge control configured for
-        this VIN — and 00:00 clears it rather than meaning midnight.
-      </p>
     </section>
   )
 }

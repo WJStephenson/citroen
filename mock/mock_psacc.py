@@ -53,7 +53,9 @@ state = {
 }
 lock = threading.Lock()
 
-args = argparse.Namespace(fast=False, flaky=False, port=5001, no_charge_control=False)
+args = argparse.Namespace(
+    fast=False, flaky=False, port=5001, no_charge_control=False, rate_limit=False
+)
 
 
 def wake_delay() -> float:
@@ -101,6 +103,45 @@ def vehicle_payload() -> dict:
         },
         "service_type": "Electric",
     }
+
+
+def charging_sessions() -> list:
+    """
+    Mirrors Charging.get_chargings(): completed sessions, not a charge curve.
+    Keys match the real record, including the calculated kw/co2/duration fields.
+    """
+    now = datetime.now(timezone.utc)
+    sessions = []
+    for i, (start_level, end_level, mode, hours) in enumerate(
+        [
+            (22, 80, "Slow", 6.5),
+            (44, 100, "Slow", 6.0),
+            (63, 80, "Quick", 0.6),
+            (18, 92, "Slow", 8.1),
+            (55, 80, "Slow", 2.8),
+            (31, 100, "Slow", 7.4),
+        ]
+    ):
+        start = now - timedelta(days=i * 3 + 1, hours=hours)
+        # 50 kWh usable on the e-C4.
+        kwh = (end_level - start_level) / 100 * 50
+        sessions.append(
+            {
+                "start_at": start.isoformat().replace("+00:00", "Z"),
+                "stop_at": (start + timedelta(hours=hours)).isoformat().replace("+00:00", "Z"),
+                "start_level": start_level,
+                "end_level": end_level,
+                "charging_mode": mode,
+                "vin": VIN,
+                "mileage": round(14732.4 - i * 180, 1),
+                "price": round(kwh * 0.075, 2),
+                "kw": round(kwh / hours, 2),
+                "co2": round(kwh * 0.021, 2),
+                "duration_min": round(hours * 60, 1),
+                "duration_str": f"{int(hours)}h{int((hours % 1) * 60):02d}",
+            }
+        )
+    return sessions
 
 
 def apply_precondition(on: bool) -> None:
@@ -236,6 +277,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"soh": 96.4})
             return
 
+        # Rate-limited commands. PSACC reports throttling as a 200 with an
+        # "error" key, not an HTTP error status.
+        if parts[0] in ("horn", "lights", "lock_door") and len(parts) == 3:
+            time.sleep(0.2 if args.fast else random.uniform(3, 10))
+            if args.rate_limit or (args.flaky and random.random() < 0.25):
+                label = {"horn": "Horn", "lights": "Lights", "lock_door": "Locks"}[parts[0]]
+                self._send(200, {"error": f"{label} rate limit exceeded"})
+                return
+            self._send(200, {"result": "ok", "command": parts[0], "value": parts[2]})
+            return
+
+        if parts == ["vehicles", "chargings"]:
+            self._send(200, charging_sessions())
+            return
+
         self._send(404, {"message": f"No mock route for /{'/'.join(parts)}"})
 
 
@@ -263,6 +319,11 @@ def main() -> None:
     parser.add_argument("--flaky", action="store_true", help="fail ~25%% of commands")
     parser.add_argument(
         "--charging", action="store_true", help="start plugged in and charging"
+    )
+    parser.add_argument(
+        "--rate-limit",
+        action="store_true",
+        help="always return the rate-limit error for horn/lights/lock_door",
     )
     parser.add_argument(
         "--no-charge-control",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BatteryRing } from './components/BatteryRing'
 import { ChargeLimitCard } from './components/ChargeLimitCard'
 import { CommandOverlay } from './components/CommandOverlay'
+import { FindCarCard } from './components/FindCarCard'
 import { ChargeWindowCard } from './components/ChargeWindowCard'
 import { PreconditionCard } from './components/PreconditionCard'
 import { SettingsSheet } from './components/SettingsSheet'
@@ -134,6 +135,7 @@ export default function App() {
             <PreconditionCard state={vehicle.state} commands={commands} />
             <ChargeLimitCard commands={commands} />
             <ChargeWindowCard commands={commands} />
+            <FindCarCard commands={commands} />
           </>
         ) : (
           <div className="empty">

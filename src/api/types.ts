@@ -80,6 +80,8 @@ export type CommandKind =
   | 'chargeStart'
   | 'chargeStop'
   | 'chargeNow'
+  | 'horn'
+  | 'lights'
 
 export interface CommandResult {
   ok: boolean

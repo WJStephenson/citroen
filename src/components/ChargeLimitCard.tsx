@@ -55,7 +55,6 @@ export function ChargeLimitCard({ commands }: { commands: Commands }) {
           </button>
         ))}
       </div>
-      <p className="card-note">Staying at 80% for daily use is easier on the traction battery.</p>
     </section>
   )
 }

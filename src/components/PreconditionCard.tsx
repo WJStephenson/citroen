@@ -45,10 +45,6 @@ export function PreconditionCard({ state, commands }: Props) {
           <span className="switch-thumb" />
         </button>
       </header>
-      <p className="card-note">
-        Takes 30–90s to reach the car — it has to be woken over the cellular network first. The car
-        heats to its own fixed target; the bridge exposes no temperature setting.
-      </p>
     </section>
   )
 }

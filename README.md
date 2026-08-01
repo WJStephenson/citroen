@@ -293,6 +293,22 @@ The bridge also exposes `/wakeup/{VIN}`,
 `/vehicles/chargings`. These are outside the design doc's scope, so the UI does
 not use them.
 
+### The 12V voltage is often nonsense
+
+`status.battery.voltage` is not dependable. Upstream reports it carrying a
+scaled or unrelated value depending on the car
+([#765](https://github.com/flobz/psa_car_controller/issues/765)), and on the
+ë-C4 it can sit at a constant like `99.0` — neither a plausible 12V reading nor
+a plausible traction voltage.
+
+The status strip therefore shows the tile **only when the value could actually
+be a 12V battery** (10–15.5V, per `isPlausibleAuxVoltage`). If your car reports
+rubbish, the tile is simply absent. A frozen number driving a low-voltage
+warning that can never fire is worse than no number: it reads as reassurance.
+
+If you want a real battery health figure instead, `/battery/soh/{VIN}` returns
+one — it is not currently surfaced in the UI.
+
 ### Things the bridge does not report back
 
 `get_vehicleinfo` returns no charge threshold and no charge schedule, so the app

@@ -88,14 +88,25 @@ button {
 .icon-button {
   width: 44px;
   height: 44px;
+  padding: 0;
   border: none;
   border-radius: 50%;
   background: var(--surface);
   color: var(--text);
-  font-size: 1.1rem;
   display: grid;
   place-items: center;
   cursor: pointer;
+}
+
+/*
+ * A fixed box, so the icon centres on the button's geometry rather than on a
+ * text baseline. 20px in a 44px target reads at the same weight as the rest of
+ * the UI; the old glyphs came out noticeably smaller.
+ */
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+  display: block;
 }
 
 .icon-button:disabled {

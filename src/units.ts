@@ -64,6 +64,19 @@ export function formatDistance(km: number | null, unit: DistanceUnit): string {
   return `${Math.round(value).toLocaleString('en-GB')} ${unit}`
 }
 
+/**
+ * Whether a reading could actually be a 12V battery.
+ *
+ * status.battery.voltage is not dependable: upstream reports it carrying a
+ * scaled or unrelated value depending on the car (flobz/psa_car_controller
+ * #765), and on the ë-C4 it can sit at a constant like 99.0 — neither a
+ * plausible 12V reading nor a plausible traction voltage. A resting 12V battery
+ * is ~12.4-12.7V, ~14.4V on charge, and below 11.8V it is flat.
+ */
+export function isPlausibleAuxVoltage(volts: number | null): boolean {
+  return volts !== null && volts >= 10 && volts <= 15.5
+}
+
 export function formatTemperature(celsius: number | null, unit: TemperatureUnit): string {
   if (celsius === null) return '—'
   const value = unit === 'F' ? celsius * 1.8 + 32 : celsius

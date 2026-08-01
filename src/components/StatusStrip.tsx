@@ -1,6 +1,6 @@
 import type { VehicleState } from '../api/types'
 import { useUnits } from '../hooks/useUnits'
-import { formatDistance, formatTemperature } from '../units'
+import { formatDistance, formatTemperature, isPlausibleAuxVoltage } from '../units'
 
 const CHARGING_LABEL: Record<VehicleState['charging'], string> = {
   charging: 'Charging',
@@ -21,9 +21,18 @@ function formatDuration(minutes: number | null): string | null {
 export function StatusStrip({ state }: { state: VehicleState }) {
   const units = useUnits()
   const remaining = formatDuration(state.chargingRemainingMinutes)
+
+  /*
+   * The tile only appears when the reading could actually be a 12V battery —
+   * see isPlausibleAuxVoltage. A number that never changes, driving a
+   * low-voltage warning that can never fire, is worse than showing nothing:
+   * it looks like reassurance.
+   */
+  const plausibleAux = isPlausibleAuxVoltage(state.auxVoltage)
+
   // Below ~12.0V the 12V auxiliary battery is heading for a no-start, which is
   // the failure mode the doc's polling limits exist to avoid.
-  const auxLow = state.auxVoltage !== null && state.auxVoltage < 12.0
+  const auxLow = plausibleAux && (state.auxVoltage as number) < 12.0
 
   const items: { label: string; value: string; tone?: 'warn' }[] = [
     {
@@ -34,10 +43,10 @@ export function StatusStrip({ state }: { state: VehicleState }) {
     { label: 'Odometer', value: formatDistance(state.odometer, units.distance) },
   ]
 
-  if (state.auxVoltage !== null) {
+  if (plausibleAux) {
     items.push({
       label: '12V aux',
-      value: `${state.auxVoltage.toFixed(1)}V`,
+      value: `${(state.auxVoltage as number).toFixed(1)}V`,
       ...(auxLow ? { tone: 'warn' as const } : {}),
     })
   }

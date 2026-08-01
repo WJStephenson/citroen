@@ -3,6 +3,7 @@ import { BatteryRing } from './components/BatteryRing'
 import { ChargeLimitCard } from './components/ChargeLimitCard'
 import { CommandOverlay } from './components/CommandOverlay'
 import { FindCarCard } from './components/FindCarCard'
+import { RefreshIcon, SettingsIcon } from './components/Icons'
 import { ChargeWindowCard } from './components/ChargeWindowCard'
 import { ChargingHistoryCard } from './components/ChargingHistoryCard'
 import { PreconditionCard } from './components/PreconditionCard'
@@ -81,7 +82,7 @@ export default function App() {
             disabled={vehicle.refreshing}
             aria-label="Refresh vehicle state from the car"
           >
-            ⟳
+            <RefreshIcon />
           </button>
           <button
             type="button"
@@ -89,7 +90,7 @@ export default function App() {
             onClick={() => setSettingsOpen(true)}
             aria-label="Settings"
           >
-            ⚙
+            <SettingsIcon />
           </button>
         </div>
       </header>

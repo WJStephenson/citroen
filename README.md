@@ -77,6 +77,10 @@ VITE_API_PROXY_TARGET=http://192.168.1.50:5000
 
 ## Deploying
 
+**Full step-by-step walkthrough: [`deploy/DEPLOYMENT.md`](deploy/DEPLOYMENT.md)** —
+Docker networking, the bridge container, the tunnel, and Cloudflare Access.
+The short version follows.
+
 ### 1. Build
 
 ```bash

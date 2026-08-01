@@ -1,0 +1,58 @@
+# psa_car_controller — the API bridge the PWA talks to.
+#
+# Add this alongside your existing nginx/cloudflared stack. The container name
+# MUST stay `psa_car_controller`: that is the hostname deploy/nginx-citroen.conf
+# proxies /api/ to.
+#
+#   docker compose -f docker-compose.psa.yml up -d
+#
+# Based on the project's own compose file (image, port, /config volume). The
+# env vars below are optional and documented in flobz/psa_car_controller
+# docs/Docker.md.
+
+services:
+  psa_car_controller:
+    image: flobz/psa_car_controller:latest
+    container_name: psa_car_controller
+    restart: unless-stopped
+
+    volumes:
+      # OAuth tokens, the SMS/OTP device registration, config.ini and the
+      # SQLite database of trips and charges all live here. Back it up —
+      # losing it means redoing the 2FA enrolment.
+      - ./psa_config:/config
+
+    # Only bind to localhost. nginx reaches the container over the Docker
+    # network by name, so this port never needs to face the LAN, let alone the
+    # internet. Drop the whole block once first-time setup is done.
+    ports:
+      - "127.0.0.1:5000:5000"
+
+    environment:
+      # -r records trips and charges into the local database. The charging
+      # history chart reads that database via /vehicles/chargings, so without
+      # it the chart stays empty.
+      #
+      # -c points at a charge-control config. Charge control is what enforces
+      # the charge limit and the charging stop time; without it those two
+      # commands return {"error": "VIN not in list"}.
+      #
+      # Newer builds configure both from the web wizard instead. Start without
+      # this line; only add it if recording or charge control fail to appear.
+      # - PSACC_OPTIONS=-c charge_config.json -r
+      - TZ=Europe/London
+
+    networks:
+      - proxy
+
+    # IMPORTANT: do not route this container through a VPN (Gluetun et al).
+    # Stellantis drops OAuth sessions and raises anti-bot challenges when the
+    # source IP hops between exit nodes. It needs your normal residential IP.
+
+networks:
+  # The network your nginx container is already on, so that nginx can resolve
+  # `psa_car_controller`. Check the name with:
+  #   docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' <nginx-container>
+  proxy:
+    external: true
+    name: proxy

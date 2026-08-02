@@ -6,44 +6,62 @@
  */
 
 :root {
-  --bg: #121212;
-  --surface: #1c1c1e;
-  --surface-2: #262629;
-  --track: #2f2f33;
+  /*
+   * The page is lighter than the tiles sitting on it, not darker. A widget
+   * dashboard needs its tiles to read as separate objects on a field; lifting
+   * the field and sinking the tiles does that with no borders and no shadows,
+   * which is what keeps a screen of eleven tiles from looking like a form.
+   *
+   * --surface-2 is the one step *up* from the page, so chrome that has to be
+   * findable — icon buttons, toasts, the controls inside a tile — still lands
+   * above its background whichever of the two it sits on.
+   */
+  --bg: #17171b;
+  --surface: #0d0d10;
+  --surface-2: #212127;
+  --track: #2e2e35;
   --text: #ececec;
-  --muted: #9a9a9a;
+  --muted: #91919a;
   --accent: #3ddc97;
   --accent-dim: #2aa877;
   --warn: #f2b544;
   --danger: #ef5f5f;
-  --radius: 18px;
 
-  /* Layout rhythm. --page-pad is the app's edge padding; the swipe track
-     reuses it so panels stay aligned to it while gutters open between them. */
+  /* Ink for anything drawn on top of a bright fill — the charge flood, the
+     primary button, a selected segment. */
+  --on-accent: #06120c;
+
+  --radius: 18px;
+  --radius-widget: 26px;
+
+  /*
+   * The two ends of the corner scale. What reads is the *contrast* between the
+   * corners of one tile, not the absolute size, so the large end stays at 44px:
+   * at that radius the shape's edge is 10px in at the height the tile's label
+   * sits, which keeps it clear of the 16px padding. Going bigger starts eating
+   * the icon.
+   */
+  --corner-sm: 14px;
+  --corner-lg: 44px;
+
+  /* Layout rhythm. --page-pad is the app's edge padding. */
   --page-pad: 1rem;
-  --page-gutter: 1.75rem;
-  /* Room for glows/rings to paint inside a clipped scroll container. */
-  --bleed: 10px;
+  --grid-gap: 0.75rem;
 
   /* One height and one radius for every interactive control, so buttons,
      segments and time fields line up on any row they share. 48px is the
-     comfortable touch target; the set had drifted between 44 and 46. */
+     comfortable touch target. */
   --control-h: 48px;
   --radius-control: 14px;
 
-  /* Cards sat 0.75rem apart, which read as one continuous slab while
-     scrolling — the gap has to be clearly larger than a card's own padding
-     for the boundary between them to register. */
-  --card-gap: 1.125rem;
-
   /*
    * --accent/--warn/--danger are tuned to sit on this dark surface, including
-   * as small-text foreground (armed pull-indicator, sheet notices, nav
-   * selection). The light theme below needs darker, more saturated versions
-   * for that same text role — brightening the surface without these would
-   * make green-on-white, amber-on-white etc. illegible — while fills like
-   * .button.is-primary keep using the bright base color against fixed dark
-   * text. Identity here; only the light override differs.
+   * as small-text foreground (armed pull-indicator, sheet notices, low-voltage
+   * warnings). The light theme below needs darker, more saturated versions for
+   * that same text role — brightening the surface without these would make
+   * green-on-white, amber-on-white etc. illegible — while fills like
+   * .button.is-primary keep using the bright base color against --on-accent.
+   * Identity here; only the light override differs.
    */
   --accent-fg: var(--accent);
   --warn-fg: var(--warn);
@@ -53,12 +71,12 @@
 }
 
 :root[data-theme='light'] {
-  --bg: #f2f2f4;
+  --bg: #eeeef1;
   --surface: #ffffff;
-  --surface-2: #ececef;
-  --track: #dcdce1;
-  --text: #1c1c1e;
-  --muted: #6b6b70;
+  --surface-2: #e2e2e8;
+  --track: #d2d2da;
+  --text: #16161a;
+  --muted: #64646c;
 
   --accent-fg: #1c8a5c;
   --warn-fg: #96650a;
@@ -100,11 +118,17 @@ button {
 
 .app {
   position: relative; /* containing block for .pull-indicator */
+  z-index: 1; /* above the ambient command layer */
   max-width: 34rem;
   margin: 0 auto;
   padding: calc(env(safe-area-inset-top) + 0.75rem) var(--page-pad)
-    calc(env(safe-area-inset-bottom) + 6rem);
+    calc(env(safe-area-inset-bottom) + 2.5rem);
   transition: transform 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Room for the rearrange bar, which is fixed over the bottom of the page. */
+.app.is-editing-layout {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 6rem);
 }
 
 /* ---------- app bar ---------- */
@@ -141,7 +165,7 @@ button {
   padding: 0;
   border: none;
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text);
   display: grid;
   place-items: center;
@@ -161,6 +185,11 @@ button {
 
 .icon-button:disabled {
   opacity: 0.5;
+}
+
+.icon-button.is-selected {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .icon-button.is-spinning {
@@ -193,147 +222,55 @@ button {
 
 /* ---------- car hero ---------- */
 
+/*
+ * Pinned above the grid rather than being a tile of its own: it is what the app
+ * is, not one of the things it tells you, and it is the only fixed point on a
+ * screen the user is otherwise free to rearrange.
+ */
+/*
+ * The padding is the point, not spare space: the car needs air around it to
+ * read as a masthead rather than as the first item in the list. It is also what
+ * the glow below is measured against, so the two grow together.
+ */
 .car-hero {
   position: relative;
   display: grid;
   place-items: center;
-  margin: 0.25rem 0 0.5rem;
-  padding: 0.75rem 0;
+  margin: 0;
+  padding: 1.75rem 0 1.5rem;
 }
 
 /*
- * A soft light behind the car rather than a shadow beneath it. On a #121212
- * surface a drop shadow is invisible; lifting the background is what actually
+ * A soft light behind the car rather than a shadow beneath it. On a near-black
+ * page a drop shadow is invisible; lifting the background is what actually
  * seats the car in the page.
  */
 .car-hero::before {
   content: '';
   position: absolute;
-  inset: -6% -10%;
-  background: radial-gradient(58% 62% at 50% 52%, rgb(255 255 255 / 7%), transparent 72%);
+  inset: -10% -10%;
+  background: radial-gradient(58% 62% at 50% 52%, rgb(255 255 255 / 6%), transparent 72%);
   pointer-events: none;
 }
 
 .car-hero-img {
   position: relative;
   /*
-   * Capped near the asset's native 308px. The source is a 308×165 render, so
-   * displaying it much larger is upscaling and goes soft on a high-DPI phone.
+   * Capped well under the asset's native 308px. The car is the masthead here,
+   * not the subject — sized so the first row of tiles is on screen when the
+   * app opens.
    */
-  width: min(74%, 272px);
+  width: min(58%, 208px);
   height: auto;
   filter: drop-shadow(0 10px 14px rgb(0 0 0 / 55%));
   user-select: none;
 }
 
-/* ---------- battery bar ---------- */
-
-.battery-bar {
-  margin: 0.375rem 0 0.75rem;
-}
-
-.battery-bar.is-stale {
-  opacity: 0.55;
-}
-
-.battery-bar-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-/*
- * The number stays in text ink, never the meter colour — text wears text
- * tokens, identity/severity belongs to the mark (the bar) beside it.
- */
-.battery-bar-value {
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-  font-size: 2.5rem;
-  font-weight: 300;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.battery-bar-bolt {
-  font-size: 1.25rem;
-  line-height: 1;
-}
-
-.battery-bar-unit {
-  font-size: 1.125rem;
-  color: var(--muted);
-}
-
-.battery-bar-range {
-  font-size: 0.9375rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.battery-bar-track {
-  height: 16px;
-  border-radius: 999px;
-  overflow: hidden;
-  /*
-   * Meter contract: the unfilled track is a dim wash of the fill's own hue,
-   * so severity reads across the whole bar, not just the filled portion.
-   * The plain --track fallback runs first: if color-mix() is unsupported the
-   * whole second declaration is invalid and dropped, leaving this in effect,
-   * rather than the rule failing open with no background at all.
-   */
-  background: var(--track);
-  background: color-mix(in srgb, var(--meter-color) 22%, transparent);
-}
-
-.battery-bar-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--meter-color);
-  transition: width 600ms cubic-bezier(0.2, 0.8, 0.3, 1);
-}
-
 .reported-at {
-  margin: 0 0 1rem;
+  margin: 0 0 1.25rem;
   text-align: center;
   font-size: 0.75rem;
   color: var(--muted);
-}
-
-/* ---------- status strip ---------- */
-
-.status-strip {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-}
-
-.status-item {
-  background: var(--surface);
-  border-radius: 14px;
-  padding: 0.7rem 0.85rem;
-}
-
-.status-item dt {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
-}
-
-.status-item dd {
-  margin: 0.2rem 0 0;
-  font-size: 0.9375rem;
-  font-weight: 500;
-}
-
-.status-item.is-warn dd {
-  color: var(--warn-fg);
 }
 
 /* ---------- ambient command layer ---------- */
@@ -359,149 +296,303 @@ button {
   }
 }
 
-/* The app sits above the ambient layer. */
-.app {
-  z-index: 1;
-}
-
-/* ---------- app tabs ---------- */
+/* ---------- widget grid ---------- */
 
 /*
- * Native horizontal scroll with snap, not custom touch-move math: it gets
- * swipe-between-pages, rubber-banding and vertical-scroll passthrough for
- * free, and behaves the same as every other scrollable list in the OS.
+ * Two columns; a tile is one or two of them wide. Deliberately not
+ * `grid-auto-flow: dense`, which would backfill the hole a half-width tile
+ * leaves next to a full-width one: in a grid the user arranges by hand, what
+ * you see has to be the order you set, and a tile silently jumping a row to
+ * plug a gap is not that.
  */
-.tabs-track {
-  display: flex;
-  align-items: flex-start;
-
-  /*
-   * The gutter you see mid-swipe. Without it the two pages butt together and
-   * the swipe reads as one long sheet sliding past, rather than as separate
-   * screens. The track is pulled out to the full viewport width and given the
-   * page padding back, so each panel still lines up with the app's 1rem edge
-   * while a real gap opens up between them.
-   */
-  gap: var(--page-gutter);
-  margin-inline: calc(var(--page-pad) * -1);
-  padding-inline: var(--page-pad);
-  scroll-padding-inline: var(--page-pad);
-
-  /*
-   * overflow-x: auto forces the cross axis to clip (per spec, `visible`
-   * computes to `auto` when the other axis is not visible), so anything that
-   * paints outside a panel — an active card's glow, a button ripple — would be
-   * cut off at the panel's top and bottom edge. This padding gives that paint
-   * room inside the clip; the negative margin keeps the layout where it was.
-   */
-  padding-block: var(--bleed);
-  margin-block: calc(var(--bleed) * -1);
-
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.tabs-track::-webkit-scrollbar {
-  display: none;
-}
-
-.tabs-panel {
-  flex: 0 0 100%;
-  min-width: 100%;
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
-}
-
-/*
- * Floating pill, not a full-width bar — the wrapper spans the viewport but
- * stays non-blocking (like .overlay) so only the pill itself catches taps.
- */
-.bottom-nav {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
-  display: flex;
-  justify-content: center;
-  padding: 0 1rem;
-  pointer-events: none;
-  z-index: 15;
-}
-
-.bottom-nav-card {
-  display: flex;
-  gap: 0.375rem;
-  width: fit-content;
-  background: rgba(38, 38, 41, 0.96);
-  backdrop-filter: blur(12px);
-  border-radius: 999px;
-  padding: 0.375rem;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
-  pointer-events: auto;
-}
-
-.bottom-nav-item {
+.widget-grid {
+  position: relative; /* the offsetParent every tile's geometry is read from */
   display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  transition:
-    background 150ms ease,
-    color 150ms ease;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--grid-gap);
 }
 
-.bottom-nav-item svg {
-  width: 22px;
-  height: 22px;
-}
-
-.bottom-nav-item.is-selected {
-  background: var(--surface-2);
-  color: var(--accent-fg);
-}
-
-/* ---------- cards ---------- */
-
-.card {
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 1.125rem 1rem;
-  margin-bottom: var(--card-gap);
-}
-
-.card:last-child {
-  margin-bottom: 0;
-}
-
-/*
- * A sustained state (preconditioning running, etc), not a transient one —
- * distinct from .is-busy, which only lasts while a command is in flight.
- *
- * The ring is static and the *inside* is what breathes. The previous version
- * animated an 18px outer glow, which bled outside the card and was then sliced
- * off by the swipe track's clip — the glow visibly squared off at the panel
- * edge. Keeping the motion inside the card's own box means nothing can be
- * clipped, and it reads as calmer next to the surrounding cards.
- */
-.card.is-active {
-  position: relative;
-  box-shadow: 0 0 0 1px var(--accent-dim);
+.shape-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
   overflow: hidden;
 }
 
-.card.is-active::before {
+.widget-cell {
+  position: relative;
+  min-width: 0;
+  /* A long press must not select the number under the finger. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.widget-cell.is-wide {
+  grid-column: 1 / -1;
+}
+
+.widget-cell.is-square {
+  aspect-ratio: 1;
+}
+
+/* Square cells set the height; full-width tiles size themselves, so that a tile
+   with a height of its own (the charge tile, whose waterline is worked out
+   against it) is not overridden here. */
+.widget-cell.is-square > .widget {
+  height: 100%;
+}
+
+/*
+ * Note there is deliberately no `touch-action: none` here. A drag in progress
+ * is held off the scroller by preventing touchmove instead, which leaves a
+ * plain swipe in edit mode free to scroll the grid — otherwise the only way to
+ * reach the tiles below the fold would be to drag one there.
+ */
+.widget-grid.is-editing .widget-cell {
+  cursor: grab;
+}
+
+/* Controls are inert while rearranging — a tap on a tile picks it up. */
+.widget-grid.is-editing .widget-face {
+  pointer-events: none;
+}
+
+.widget-grid.is-editing .widget-cell > .widget {
+  animation: widget-wobble 400ms ease-in-out infinite;
+  /* Negative delays start each tile at a different point in the same cycle, so
+     the grid shivers rather than pulsing in unison. */
+  animation-delay: calc(var(--stagger) * -47ms);
+}
+
+@keyframes widget-wobble {
+  0%,
+  100% {
+    rotate: -0.5deg;
+  }
+  50% {
+    rotate: 0.5deg;
+  }
+}
+
+.widget-cell.is-dragging {
+  z-index: 4;
+  cursor: grabbing;
+}
+
+.widget-cell.is-dragging > .widget {
+  animation: none;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 55%);
+}
+
+/* ---------- widgets ---------- */
+
+.widget {
+  position: relative;
+  display: block;
+  background: var(--surface);
+  border-radius: var(--radius-widget);
+  overflow-wrap: anywhere;
+  transition: scale 120ms ease;
+}
+
+/*
+ * Silhouettes, after Material 3 Expressive's shape set. The lobed ones are cut
+ * from generated paths (see Widget.tsx); the rest is done with corner radii,
+ * which is what keeps tiles holding a slider or a chart rectangular where they
+ * have to be.
+ */
+.widget.is-circle {
+  border-radius: 50%;
+}
+
+.widget.is-cookie {
+  clip-path: url(#widget-cookie);
+}
+
+.widget.is-clover {
+  clip-path: url(#widget-clover);
+}
+
+.widget.is-sunny {
+  clip-path: url(#widget-sunny);
+}
+
+.widget.is-boom {
+  clip-path: url(#widget-boom);
+}
+
+.widget-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1rem;
+}
+
+.widget-cell.is-wide .widget-face {
+  padding: 1.125rem 1.125rem 1.25rem;
+}
+
+/* Shaped tiles have no corners to hang a label in, so everything centres and
+   the padding follows the inscribed circle rather than the box. */
+.widget.is-rounded .widget-face {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 17%;
+}
+
+.widget.is-rounded .widget-body {
+  align-items: center;
+  flex: 0 1 auto;
+}
+
+.widget-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.widget-head h2 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.widget-icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.widget-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.widget-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* On a square tile the reading is optically centred in what the label leaves,
+   rather than sitting on the floor of the tile with all the air above it. */
+.widget-cell.is-square .is-squircle .widget-body {
+  justify-content: center;
+  padding-bottom: 0.4rem;
+}
+
+/*
+ * The reading. Light and large with the tracking pulled in — the numbers are
+ * the only thing on most tiles, so they carry the whole type treatment.
+ */
+.widget-value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.1em;
+  margin: 0;
+  font-size: 2.125rem;
+  font-weight: 300;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-value.is-lg {
+  font-size: 3.5rem;
+}
+
+/* Text wears text tokens; the unit is subordinate to the number, never coloured
+   by whatever the number happens to mean. */
+.widget-unit {
+  font-size: 0.4em;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+
+.widget-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.widget-note.is-warn {
+  color: var(--warn-fg);
+}
+
+/* A heading with something to its right — the history tile's chart/table
+   toggle, and nothing else so far. */
+.widget-aside {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.widget-aside .widget-note {
+  margin: 0;
+}
+
+/* A state rather than a measurement: "Charging", "Off". */
+.state-word {
+  margin: 0;
+  font-size: 1.3125rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.state-word.is-warn {
+  color: var(--warn-fg);
+}
+
+/* ---------- tile corner signatures ---------- */
+
+/*
+ * Where a tile has to stay rectangular — it holds a slider, a chart, a row of
+ * time fields — the corners carry the difference instead of the outline. The
+ * assignment is not decorative:
+ *
+ *   a diagonal pair       a counted number or a sequence (charge state, odometer),
+ *                         mirrored between the two so they read as a set;
+ *   a domed top           something with a fill line in it (the charge tile and
+ *                         the limit it fills to), so the two are visibly the
+ *                         same kind of thing;
+ *   an even squircle      the long, calm tiles at the foot of the grid.
+ */
+.widget-charge-state {
+  border-radius: var(--corner-lg) var(--corner-sm) var(--corner-lg) var(--corner-sm);
+}
+
+.widget-odometer {
+  border-radius: var(--corner-sm) var(--corner-lg) var(--corner-sm) var(--corner-lg);
+}
+
+.widget-charge,
+.widget-limit {
+  border-radius: var(--corner-lg) var(--corner-lg) var(--corner-sm) var(--corner-sm);
+}
+
+/*
+ * A sustained state (pre-conditioning running) or a command in flight on a tile
+ * that is itself the button. The *inside* is what breathes, so nothing paints
+ * outside the tile's own box where the shape's clip would slice it off.
+ */
+.widget.is-active::before,
+.widget.is-working::before {
   content: '';
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   pointer-events: none;
   background: radial-gradient(
     120% 80% at 50% 0%,
@@ -509,6 +600,13 @@ button {
     transparent 70%
   );
   animation: card-breathe 2.6s ease-in-out infinite;
+}
+
+/* The hairline ring only goes on tiles that still have an outline to draw it
+   on — clip-path cuts a box-shadow away with everything else outside the
+   shape, so on a lobed tile the breathing gradient is the whole signal. */
+.widget.is-squircle.is-active {
+  box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
 @keyframes card-breathe {
@@ -521,36 +619,320 @@ button {
   }
 }
 
-.card-head {
+/* ---------- the charge tile ---------- */
+
+/*
+ * The signature. The tile fills from the bottom to the state of charge behind a
+ * wave, and the reading is redrawn in dark ink below the waterline so the
+ * number is cut in half by it. Everything else on the dashboard is deliberately
+ * quieter than this.
+ *
+ * The waterline is a two-layer mask: a repeating wave band centred on the fill
+ * line, unioned with a solid rectangle that starts below the band. The band has
+ * to sit *above* where the solid begins, or the troughs would be filled in and
+ * the edge would read as a row of bumps rather than as water.
+ *
+ * The tile has a fixed height and the waterline is worked out from it in px,
+ * because a percentage in mask-position is resolved against the positioning
+ * area *minus the mask image* — a 16px band would land up to 16px above the
+ * line it is meant to mark, and drift away from the solid body under it.
+ */
+:root {
+  --wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='16' viewBox='0 0 56 16'%3E%3Cpath d='M0 8C9.33 0 18.67 0 28 8s18.67 8 28 0v8H0Z' fill='%23000'/%3E%3C/svg%3E");
+  --wave-h: 16px;
+}
+
+.widget-charge {
+  --flood-h: 184px;
+  height: var(--flood-h);
+}
+
+.widget-flood {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--flood-color);
+  color: var(--on-accent);
+
+  /* --flood-level is a 0–1 fraction set on the element. */
+  --water: calc(var(--flood-level) * var(--flood-h));
+  --wave-y: calc(var(--flood-h) - var(--water) - var(--wave-h) / 2);
+  --body-h: max(0px, calc(var(--water) - var(--wave-h) / 2));
+
+  -webkit-mask-image: var(--wave), linear-gradient(#000, #000);
+  -webkit-mask-repeat: repeat-x, no-repeat;
+  -webkit-mask-size: 56px var(--wave-h), 100% var(--body-h);
+  -webkit-mask-position: 0 var(--wave-y), 0 100%;
+  mask-image: var(--wave), linear-gradient(#000, #000);
+  mask-repeat: repeat-x, no-repeat;
+  mask-size: 56px var(--wave-h), 100% var(--body-h);
+  mask-position: 0 var(--wave-y), 0 100%;
+
+  transition:
+    mask-size 700ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    mask-position 700ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* The reading sits high enough for the waterline to cut through it at a
+   typical state of charge; the range line is pinned to the foot. */
+.widget-charge .widget-note {
+  margin-top: auto;
+}
+
+/* Below the waterline everything is ink on the fill, including the parts that
+   are muted above it. */
+.widget-flood .widget-icon,
+.widget-flood .widget-unit,
+.widget-flood .widget-note {
+  color: inherit;
+  opacity: 0.72;
+}
+
+/* Energy actually going in is the one thing on this screen that moves on its
+   own, so it gets the only ambient motion: the surface drifts. */
+.widget-charge.is-charging .widget-flood {
+  animation: flood-drift 9s linear infinite;
+}
+
+@keyframes flood-drift {
+  from {
+    mask-position:
+      0 var(--wave-y),
+      0 100%;
+  }
+  to {
+    mask-position:
+      -56px var(--wave-y),
+      0 100%;
+  }
+}
+
+.widget-charge.is-stale {
+  opacity: 0.55;
+}
+
+/* ---------- charge state tile ---------- */
+
+.widget-charge-state .phase {
+  margin-bottom: 0.1rem;
+}
+
+/*
+ * Unplugged, plugged in, charging, complete. A real sequence, so it is drawn as
+ * one — the steps behind you stay lit, which is what says how far along the
+ * charge is without a second number.
+ */
+.phase {
+  display: flex;
+  gap: 4px;
+  margin-top: 0.55rem;
+}
+
+.phase-step {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--track);
+  transition: background 250ms ease;
+}
+
+.phase-step.is-reached {
+  background: var(--accent-dim);
+}
+
+.phase-step.is-now {
+  background: var(--accent);
+}
+
+/* ---------- 12V tile ---------- */
+
+/* The dial hugs the tile's own edge — the tile is the instrument. */
+.dial {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.dial circle {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.dial-track {
+  stroke: var(--track);
+}
+
+.dial-value {
+  stroke: var(--accent);
+  transition: stroke-dasharray 600ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.widget-aux.is-warn .dial-value {
+  stroke: var(--warn);
+}
+
+/* ---------- climate tile ---------- */
+
+.widget-precondition .switch {
+  margin-top: 0.7rem;
+}
+
+/* ---------- action tiles: lights, horn ---------- */
+
+/*
+ * The tile is the button. A transparent hit layer over the whole shape, rather
+ * than a rectangular button inside it — a full-width button in a lobed tile
+ * would need exactly the corners the shape does not have.
+ */
+.widget-hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* `scale` rather than `transform`, so it composes with the `rotate` the tiles
+   wobble on in edit mode instead of cancelling it. */
+.widget:has(.widget-hit:active:not(:disabled)) {
+  scale: 0.96;
+}
+
+.widget:has(.widget-hit:disabled) {
+  opacity: 0.5;
+}
+
+/* The ring goes on the cell: an outline on a clipped tile is clipped with it. */
+.widget-cell:has(.widget-hit:focus-visible) {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 4px;
+  border-radius: var(--radius-widget);
+}
+
+.widget-action .state-word {
+  margin-top: 0.15rem;
+}
+
+.widget-action.is-armed .widget-note {
+  font-weight: 500;
+}
+
+/* ---------- charge limit tile ---------- */
+
+/*
+ * Swiped up and down rather than tapped through presets: the limit is one
+ * number on a scale, and a column of buttons only ever offers the four someone
+ * guessed at.
+ *
+ * touch-action: none is what lets the gesture exist at all — without it the
+ * page takes the vertical drag as a scroll before the tile ever hears about it.
+ * It is scoped to the swipe surface, so the tile's header row still scrolls the
+ * page normally.
+ */
+.limit-swipe {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+  touch-action: none;
+  cursor: ns-resize;
+}
+
+.limit-swipe[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.limit-swipe .widget-value {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  transform-origin: left bottom;
+}
+
+/* Under the finger the number lifts — the only feedback there is that the
+   gesture has been taken, since the finger is covering half the tile. */
+.limit-swipe.is-dragging .widget-value {
+  transform: scale(1.08);
+}
+
+.limit-track {
+  position: relative;
+  flex: 0 0 6px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.limit-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: height 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Nothing to animate towards while the finger is setting it. */
+.limit-swipe.is-dragging .limit-fill {
+  transition: none;
+}
+
+/* ---------- rearrange bar ---------- */
+
+.edit-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
+  z-index: 25;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
+  width: min(100% - 2rem, 32rem);
+  margin: 0 auto;
+  padding: 0.4rem 0.4rem 0.4rem 1rem;
+  border-radius: 999px;
+  background: rgba(38, 38, 41, 0.96);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+  animation: rise 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
-.card h2 {
+.edit-bar-hint {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.card h3 {
-  margin: 1.25rem 0 0.25rem;
-  font-size: 0.9375rem;
-}
-
-.card-sub {
-  margin: 0.2rem 0 0;
   font-size: 0.8125rem;
-  color: var(--muted);
+  color: #c9c9d0;
 }
 
-.card-note {
-  margin: 0.75rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--muted);
+.edit-bar-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex: 0 0 auto;
 }
+
+.edit-bar .button {
+  border-radius: 999px;
+}
+
+.edit-bar .button svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---------- controls ---------- */
 
 .row {
   display: flex;
@@ -560,11 +942,10 @@ button {
   margin-top: 0.75rem;
 }
 
-/* ---------- controls ---------- */
-
 .switch {
   position: relative;
   flex: 0 0 auto;
+  align-self: flex-start;
   width: 58px;
   height: 34px;
   border: none;
@@ -614,15 +995,10 @@ button {
  *
  * Disabled = unavailable, so it recedes. Busy = this control is doing the
  * thing you just asked for, so it should be the most present item on screen,
- * not the dimmest. The old treatment animated opacity on the whole element and
- * broke both ways:
- *
- *   - A busy *button* is also `disabled`. The pulse keyframe only declared
- *     50%, so the implicit 0%/100% inherited the disabled 0.5 — it flickered
- *     0.5 -> 0.45 -> 0.5 and read as nothing at all.
- *   - A busy *group* (the segmented row) is not itself disabled, so it swung
- *     the full 1 -> 0.45 while its children already sat at 0.55, compounding
- *     to near-invisible and strobing the whole block.
+ * not the dimmest. Opacity animation broke both ways: a busy button is also
+ * `disabled`, so it flickered inside the dimmed range and read as nothing;
+ * a busy *group* is not disabled, so it swung the full range while its
+ * children already sat dimmed, and strobed the whole block.
  *
  * Replaced with one indeterminate bar, clipped to the control's own box so it
  * can never bleed past its edges, reading identically on every control.
@@ -692,14 +1068,13 @@ button {
 .segment.is-selected {
   background: var(--accent-dim);
   border-color: var(--accent-dim);
-  color: #06120c;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
 .segment:disabled {
   opacity: 0.55;
 }
-
 
 .segmented.is-pair {
   grid-template-columns: repeat(2, minmax(4.5rem, 1fr));
@@ -736,6 +1111,10 @@ button {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   min-height: var(--control-h);
   padding: 0 1.1rem;
   border: 1px solid var(--track);
@@ -753,14 +1132,13 @@ button {
 .button.is-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #06120c;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
 .button:disabled {
   opacity: 0.5;
 }
-
 
 .button.is-wide {
   flex: 1;
@@ -771,30 +1149,10 @@ button {
   color: var(--warn-fg);
 }
 
-/*
- * The lights and horn now express themselves through the full-screen ambient
- * canvas, so the button only has to say "this one is working" — the same
- * indeterminate bar every other busy control uses. The previous per-button
- * strobe and expanding ring competed with the ambient layer, and the ring
- * escaped the button's box to be clipped by the swipe track.
- */
-.button.is-flashing,
-.button.is-sounding {
-  position: relative;
-  overflow: hidden;
-  opacity: 1 !important;
-}
-
-.button.is-flashing::after,
-.button.is-sounding::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 2px;
-  background: currentColor;
-  transform-origin: left center;
-  animation: indeterminate 1.15s ease-in-out infinite;
-  pointer-events: none;
+.button.is-small {
+  min-height: 34px;
+  padding: 0 0.7rem;
+  font-size: 0.8125rem;
 }
 
 .time-input {
@@ -830,8 +1188,7 @@ button {
  */
 .button:not(:disabled):active,
 .segment:not(:disabled):active,
-.icon-button:not(:disabled):active,
-.bottom-nav-item:active {
+.icon-button:not(:disabled):active {
   transform: scale(0.97);
 }
 
@@ -841,12 +1198,17 @@ button {
 .segment:focus-visible,
 .icon-button:focus-visible,
 .switch:focus-visible,
-.bottom-nav-item:focus-visible,
 .time-input:focus-visible,
 .pin-input:focus-visible,
+.widget-cell:focus-visible,
 .field input:focus-visible {
   outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
+}
+
+.widget-cell:focus-visible {
+  outline-offset: 4px;
+  border-radius: var(--radius-widget);
 }
 
 /* ---------- charts ---------- */
@@ -931,12 +1293,6 @@ button {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
-.button.is-small {
-  min-height: 34px;
-  padding: 0 0.7rem;
-  font-size: 0.8125rem;
-}
-
 .table-wrap {
   margin-top: 0.875rem;
   overflow-x: auto;
@@ -1015,7 +1371,7 @@ button {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 5rem);
+  bottom: calc(env(safe-area-inset-bottom) + 1.25rem);
   display: flex;
   justify-content: center;
   padding: 0 1rem;
@@ -1075,7 +1431,7 @@ button {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 9rem);
+  bottom: calc(env(safe-area-inset-bottom) + 5.5rem);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1121,11 +1477,11 @@ button {
 }
 
 .skeleton-car {
-  width: min(74%, 272px);
-  height: 145px;
+  width: min(58%, 208px);
+  height: 112px;
   margin: 0.5rem 0;
   border-radius: 12px;
-  background: var(--surface);
+  background: var(--surface-2);
   animation: pulse 1.6s ease-in-out infinite;
 }
 
@@ -1133,20 +1489,8 @@ button {
   width: 100%;
   height: 16px;
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--surface-2);
   animation: pulse 1.6s ease-in-out infinite;
-}
-
-.skeleton-line {
-  width: 60%;
-  height: 12px;
-  border-radius: 6px;
-  background: var(--surface);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-
-.skeleton-line.is-short {
-  width: 35%;
 }
 
 .empty {
@@ -1263,6 +1607,19 @@ button {
 .sheet h2 {
   margin: 0 0 1rem;
   font-size: 1.125rem;
+}
+
+.sheet h3 {
+  margin: 1.25rem 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+/* Small print under a control, explaining what it costs. */
+.note {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .field {

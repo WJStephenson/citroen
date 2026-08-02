@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchChargingSessions } from '../api/client'
 import { ApiError, type ChargingSession } from '../api/types'
+import { ChartIcon } from './Icons'
+import { Widget, WidgetNote } from './Widget'
 
 /**
  * Charging history: energy added per completed session.
@@ -58,7 +60,7 @@ function duration(minutes: number | null): string {
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
 }
 
-export function ChargingHistoryCard() {
+export function ChargingHistoryWidget() {
   const [sessions, setSessions] = useState<ChargingSession[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
@@ -77,31 +79,23 @@ export function ChargingHistoryCard() {
 
   if (error) {
     return (
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <h2>Charging history</h2>
-            <p className="card-sub">{error}</p>
-          </div>
+      <Widget icon={<ChartIcon />} label="Charging history">
+        <WidgetNote>{error}</WidgetNote>
+        <div className="row">
           <button type="button" className="button" onClick={load}>
-            Retry
+            Try again
           </button>
-        </header>
-      </section>
+        </div>
+      </Widget>
     )
   }
 
   if (sessions === null) {
     return (
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <h2>Charging history</h2>
-            <p className="card-sub">Loading…</p>
-          </div>
-        </header>
+      <Widget icon={<ChartIcon />} label="Charging history">
+        <WidgetNote>Loading…</WidgetNote>
         <div className="chart-skeleton" aria-hidden="true" />
-      </section>
+      </Widget>
     )
   }
 
@@ -109,14 +103,9 @@ export function ChargingHistoryCard() {
   // state on a fresh install rather than an error.
   if (sessions.length === 0) {
     return (
-      <section className="card">
-        <header className="card-head">
-          <div>
-            <h2>Charging history</h2>
-            <p className="card-sub">No sessions recorded yet</p>
-          </div>
-        </header>
-      </section>
+      <Widget icon={<ChartIcon />} label="Charging history">
+        <WidgetNote>No sessions recorded yet. The first one will appear here once it finishes.</WidgetNote>
+      </Widget>
     )
   }
 
@@ -134,14 +123,11 @@ export function ChargingHistoryCard() {
   const total = values.reduce((sum, v) => sum + v, 0)
 
   return (
-    <section className="card">
-      <header className="card-head">
-        <div>
-          <h2>Charging history</h2>
-          <p className="card-sub">
-            Energy added · last {recent.length} session{recent.length === 1 ? '' : 's'}
-          </p>
-        </div>
+    <Widget icon={<ChartIcon />} label="Charging history">
+      <div className="widget-aside">
+        <WidgetNote>
+          Energy added · last {recent.length} session{recent.length === 1 ? '' : 's'}
+        </WidgetNote>
         <button
           type="button"
           className="button is-small"
@@ -150,7 +136,7 @@ export function ChargingHistoryCard() {
         >
           {asTable ? 'Chart' : 'Table'}
         </button>
-      </header>
+      </div>
 
       {asTable ? (
         <div className="table-wrap">
@@ -286,6 +272,6 @@ export function ChargingHistoryCard() {
           </div>
         </>
       )}
-    </section>
+    </Widget>
   )
 }

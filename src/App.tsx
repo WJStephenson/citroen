@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AmbientCanvas, type AmbientMode } from './components/AmbientCanvas'
-import { BatteryBar } from './components/BatteryBar'
-import { ChargeLimitCard } from './components/ChargeLimitCard'
-import { CommandOverlay } from './components/CommandOverlay'
-import { ControlTabs } from './components/ControlTabs'
-import { FindCarCard } from './components/FindCarCard'
-import { BoltIcon, CarIcon, HomeIcon, RefreshIcon, SettingsIcon } from './components/Icons'
-import { ChargeWindowCard } from './components/ChargeWindowCard'
-import { ChargingHistoryCard } from './components/ChargingHistoryCard'
+import { ChargeLimitWidget } from './components/ChargeLimitWidget'
+import { ChargeWindowWidget } from './components/ChargeWindowWidget'
+import { ChargingHistoryWidget } from './components/ChargingHistoryWidget'
 import { CarHero } from './components/CarHero'
-import { PreconditionCard } from './components/PreconditionCard'
+import { CommandOverlay } from './components/CommandOverlay'
+import { HornWidget, LightsWidget } from './components/FindCarWidgets'
+import { LayoutIcon, RefreshIcon, SettingsIcon } from './components/Icons'
+import { PreconditionWidget } from './components/PreconditionWidget'
 import { SettingsSheet } from './components/SettingsSheet'
-import { StatusStrip } from './components/StatusStrip'
+import {
+  AuxWidget,
+  CabinWidget,
+  ChargeStateWidget,
+  ChargeWidget,
+  OdometerWidget,
+} from './components/StatWidgets'
 import { Toasts } from './components/Toasts'
+import { WidgetGrid, type WidgetItem } from './components/WidgetGrid'
 import { getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
 import { useCommands } from './hooks/useCommands'
@@ -20,6 +25,7 @@ import { usePullToRefresh } from './hooks/usePullToRefresh'
 import { useVehicle } from './hooks/useVehicle'
 import { LockScreen } from './lock/LockScreen'
 import { applyUpdate, registerServiceWorker } from './sw-register'
+import { isPlausibleAuxVoltage } from './units'
 
 /** "4 min ago" — the age of the data matters more than the clock time here. */
 function relativeTime(date: Date | null): string {
@@ -36,6 +42,7 @@ function relativeTime(date: Date | null): string {
 export default function App() {
   const lock = useAppLock()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [editingLayout, setEditingLayout] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [, forceTick] = useState(0)
 
@@ -44,7 +51,9 @@ export default function App() {
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
   // A deliberate pull is the user asking the car itself, not the bridge cache.
   const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
-  const pull = usePullToRefresh(liveRefresh, !lock.locked && !commands.active)
+  // Rearranging is a drag that starts at the top of the page as often as not,
+  // so it would otherwise fight pull-to-refresh for the same gesture.
+  const pull = usePullToRefresh(liveRefresh, !lock.locked && !commands.active && !editingLayout)
 
   useEffect(() => registerServiceWorker(() => setUpdateReady(true)), [])
 
@@ -75,11 +84,56 @@ export default function App() {
         : null
   const ambientIntensity = commands.active ? 1 : 0.4
 
+  /*
+   * The canonical layout, which is also the fallback order and the order a
+   * newly available tile is slotted back into. Charge leads because it is the
+   * question the app exists to answer; the tiles you configure once and forget
+   * sit under the ones you read every day.
+   *
+   * The 12V tile is conditional — see isPlausibleAuxVoltage. A number that
+   * never changes, driving a low-voltage warning that can never fire, is worse
+   * than showing nothing: it looks like reassurance. Being conditional, it
+   * flips the parity of the half-width tiles, so it is placed last among them:
+   * when it is absent the gap that leaves falls beside the charge limit, at the
+   * break between what you read and what you schedule, rather than mid-grid.
+   */
+  const state = vehicle.state
+  const widgets: WidgetItem[] = state
+    ? [
+        { id: 'charge', label: 'Charge', span: 2, node: <ChargeWidget state={state} stale={stale} /> },
+        { id: 'chargeState', label: 'Charge state', node: <ChargeStateWidget state={state} /> },
+        {
+          id: 'precondition',
+          label: 'Climate',
+          node: <PreconditionWidget state={state} commands={commands} />,
+        },
+        { id: 'cabin', label: 'Cabin temperature', node: <CabinWidget celsius={state.cabinTemp} /> },
+        { id: 'odometer', label: 'Odometer', node: <OdometerWidget km={state.odometer} /> },
+        { id: 'lights', label: 'Lights', node: <LightsWidget commands={commands} /> },
+        { id: 'horn', label: 'Horn', node: <HornWidget commands={commands} /> },
+        {
+          id: 'chargeLimit',
+          label: 'Charge limit',
+          node: <ChargeLimitWidget commands={commands} />,
+        },
+        ...(isPlausibleAuxVoltage(state.auxVoltage)
+          ? [{ id: 'aux', label: '12V battery', node: <AuxWidget volts={state.auxVoltage} /> }]
+          : []),
+        {
+          id: 'chargeWindow',
+          label: 'Charging window',
+          span: 2,
+          node: <ChargeWindowWidget commands={commands} />,
+        },
+        { id: 'history', label: 'Charging history', span: 2, node: <ChargingHistoryWidget /> },
+      ]
+    : []
+
   return (
     <>
       <AmbientCanvas mode={ambient} intensity={ambientIntensity} />
       <div
-        className="app"
+        className={`app ${editingLayout ? 'is-editing-layout' : ''}`}
         style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}
       >
         <div
@@ -98,6 +152,17 @@ export default function App() {
             </p>
           </div>
           <div className="app-bar-actions">
+            {state && (
+              <button
+                type="button"
+                className={`icon-button ${editingLayout ? 'is-selected' : ''}`}
+                onClick={() => setEditingLayout((open) => !open)}
+                aria-pressed={editingLayout}
+                aria-label="Rearrange the dashboard"
+              >
+                <LayoutIcon />
+              </button>
+            )}
             <button
               type="button"
               className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
@@ -137,61 +202,23 @@ export default function App() {
         )}
 
         <main className="content">
-          {vehicle.loading && !vehicle.state ? (
+          {vehicle.loading && !state ? (
             <div className="skeleton" aria-label="Loading vehicle state">
               <div className="skeleton-car" />
               <div className="skeleton-bar" />
             </div>
-          ) : vehicle.state ? (
-            <ControlTabs
-              tabs={[
-                {
-                  id: 'home',
-                  label: 'Home',
-                  icon: <HomeIcon />,
-                  content: (
-                    <>
-                      <CarHero />
-                      <BatteryBar
-                        level={vehicle.state.battery}
-                        range={vehicle.state.range}
-                        charging={vehicle.state.charging}
-                        stale={stale}
-                      />
-                      {vehicle.state.reportedAt && (
-                        <p className="reported-at">
-                          Car last reported {relativeTime(vehicle.state.reportedAt)}
-                        </p>
-                      )}
-                      <StatusStrip state={vehicle.state} />
-                    </>
-                  ),
-                },
-                {
-                  id: 'control',
-                  label: 'Car control',
-                  icon: <CarIcon />,
-                  content: (
-                    <>
-                      <PreconditionCard state={vehicle.state} commands={commands} />
-                      <FindCarCard commands={commands} />
-                    </>
-                  ),
-                },
-                {
-                  id: 'charging',
-                  label: 'Charge management',
-                  icon: <BoltIcon />,
-                  content: (
-                    <>
-                      <ChargeLimitCard commands={commands} />
-                      <ChargeWindowCard commands={commands} />
-                      <ChargingHistoryCard />
-                    </>
-                  ),
-                },
-              ]}
-            />
+          ) : state ? (
+            <>
+              <CarHero />
+              {state.reportedAt && (
+                <p className="reported-at">Car last reported {relativeTime(state.reportedAt)}</p>
+              )}
+              <WidgetGrid
+                items={widgets}
+                editing={editingLayout}
+                onEditingChange={setEditingLayout}
+              />
+            </>
           ) : (
             <div className="empty">
               <p>No vehicle data yet.</p>

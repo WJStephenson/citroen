@@ -6,6 +6,8 @@ import {
   setChargeStopHour,
 } from '../api/client'
 import type { Commands } from '../hooks/useCommands'
+import { ClockIcon } from './Icons'
+import { Widget, WidgetNote } from './Widget'
 
 const LS_START = 'ec4.chargeStart'
 const LS_STOP = 'ec4.chargeStop'
@@ -27,7 +29,7 @@ const LS_STOP = 'ec4.chargeStop'
  *     whether it charges immediately or waits, so clearing means switching to
  *     immediate charging.
  */
-export function ChargeWindowCard({ commands }: { commands: Commands }) {
+export function ChargeWindowWidget({ commands }: { commands: Commands }) {
   const [start, setStart] = useState(() => localStorage.getItem(LS_START) ?? '00:30')
   const [stop, setStop] = useState(() => localStorage.getItem(LS_STOP) ?? '07:00')
   const [savedStart, setSavedStart] = useState(() => localStorage.getItem(LS_START))
@@ -118,16 +120,11 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
     savedStart !== null && savedStop !== null && savedStart > savedStop ? ' (overnight)' : ''
 
   return (
-    <section className="card">
-      <header className="card-head">
-        <div>
-          <h2>Charging window</h2>
-          <p className="card-sub">
-            {window}
-            {overnight}
-          </p>
-        </div>
-      </header>
+    <Widget icon={<ClockIcon />} label="Charging window">
+      <WidgetNote>
+        {window}
+        {overnight}
+      </WidgetNote>
 
       <div className="window-grid">
         <label className="window-label" htmlFor="charge-start">
@@ -184,6 +181,6 @@ export function ChargeWindowCard({ commands }: { commands: Commands }) {
           Clear stop
         </button>
       </div>
-    </section>
+    </Widget>
   )
 }

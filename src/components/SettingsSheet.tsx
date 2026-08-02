@@ -105,7 +105,7 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
             onChange={(event) => setMinutes(Number(event.target.value))}
           />
         </label>
-        <p className="card-note">
+        <p className="note">
           Polling below {MIN_POLL_MINUTES} minutes keeps the car's ECUs awake and flattens the 12V
           battery. Pull down on the dashboard whenever you want live state.
         </p>
@@ -176,13 +176,13 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
             </button>
           </div>
         </div>
-        <p className="card-note">
+        <p className="note">
           Display only — the bridge always reports km and °C, and nothing sent to the car is
           converted.
         </p>
 
         <h3>App lock</h3>
-        <p className="card-note">
+        <p className="note">
           Currently: {method === 'none' ? 'off' : method === 'pin' ? 'PIN' : 'biometric'}. This locks
           the app on this phone only — the tunnel itself is protected by Cloudflare Access.
         </p>

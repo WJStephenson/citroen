@@ -19,6 +19,10 @@ const base = {
   focusable: false,
 }
 
+/* Widget headers carry a lighter stroke than the 44px app-bar buttons: at 15px
+   a 2px stroke fills in and the glyph reads as a blob. */
+const light = { ...base, strokeWidth: 1.6 }
+
 export function RefreshIcon() {
   return (
     <svg {...base}>
@@ -44,31 +48,144 @@ export function SettingsIcon() {
   )
 }
 
-export function HomeIcon() {
+/** Rearrange: four tiles, one lifted out of the grid. */
+export function LayoutIcon() {
   return (
-    <svg {...base}>
-      <path d="M4 11.5 12 4l8 7.5" />
-      <path d="M6 10v9h12v-9" />
+    <svg {...base} strokeWidth={1.8}>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
+      <rect x="14.5" y="2.5" width="7" height="7" rx="2" />
     </svg>
   )
 }
 
-export function CarIcon() {
+export function CheckIcon() {
   return (
     <svg {...base}>
-      <path d="M4 16v-3.5L6.5 7h11L20 12.5V16" />
-      <path d="M4 16h16" />
-      <path d="M4 16v2.5M20 16v2.5" />
-      <circle cx="8" cy="16" r="1.6" />
-      <circle cx="16" cy="16" r="1.6" />
+      <path d="M5 12.5 10 17.5 19 7" />
     </svg>
   )
 }
 
 export function BoltIcon() {
   return (
-    <svg {...base}>
+    <svg {...light}>
       <path d="M13 3 5 13.5h5.5L10 21l8-10.5h-5.5L13 3Z" />
+    </svg>
+  )
+}
+
+/** Range: a road running to the horizon. */
+export function RangeIcon() {
+  return (
+    <svg {...light}>
+      <path d="M4 20 9.5 4M20 20 14.5 4" />
+      <path d="M12 6v2M12 12v2M12 18v2" />
+    </svg>
+  )
+}
+
+export function PlugIcon() {
+  return (
+    <svg {...light}>
+      <path d="M9 3v5M15 3v5" />
+      <path d="M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6V8Z" />
+      <path d="M12 17v4" />
+    </svg>
+  )
+}
+
+export function ThermometerIcon() {
+  return (
+    <svg {...light}>
+      <path d="M14 14.5V5a2 2 0 1 0-4 0v9.5a4 4 0 1 0 4 0Z" />
+      <circle cx="12" cy="17.5" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** Odometer: a trip counter's needle at rest. */
+export function OdometerIcon() {
+  return (
+    <svg {...light}>
+      <path d="M4.2 17.5a9 9 0 1 1 15.6 0" />
+      <path d="M12 13.5 16 9.5" />
+      <circle cx="12" cy="14" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function BatteryIcon() {
+  return (
+    <svg {...light}>
+      <rect x="2.5" y="7" width="16" height="10" rx="2.5" />
+      <path d="M21.5 10.5v3" />
+      <path d="M6.5 12h4M8.5 10v4" />
+      <path d="M13 12h2.5" />
+    </svg>
+  )
+}
+
+/** Pre-conditioning: air moving through the cabin. */
+export function ClimateIcon() {
+  return (
+    <svg {...light}>
+      <path d="M3 8h11a3 3 0 1 0-3-3" />
+      <path d="M3 12.5h14.5a3 3 0 1 1-3 3" />
+      <path d="M3 17h7" />
+    </svg>
+  )
+}
+
+/** A headlamp throwing a beam. */
+export function LightsIcon() {
+  return (
+    <svg {...light}>
+      <path d="M3 5h3a7 7 0 0 1 0 14H3Z" />
+      <path d="M15.5 8.5h5.5M16.5 12h4.5M15.5 15.5h5.5" />
+    </svg>
+  )
+}
+
+/** The horn: a cone and the noise coming out of it. */
+export function HornIcon() {
+  return (
+    <svg {...light}>
+      <path d="M3 9.5h3.5L11 6v12L6.5 14.5H3Z" />
+      <path d="M14.5 9.5a4 4 0 0 1 0 5" />
+      <path d="M17.5 7a8 8 0 0 1 0 10" />
+    </svg>
+  )
+}
+
+/** Charge limit: a battery filled to a chosen mark. */
+export function LimitIcon() {
+  return (
+    <svg {...light}>
+      <rect x="2.5" y="7" width="16" height="10" rx="2.5" />
+      <path d="M21.5 10.5v3" />
+      <path d="M5.5 10h5.5v4H5.5z" fill="currentColor" stroke="none" />
+      <path d="M13.5 5.5v13" />
+    </svg>
+  )
+}
+
+export function ClockIcon() {
+  return (
+    <svg {...light}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </svg>
+  )
+}
+
+export function ChartIcon() {
+  return (
+    <svg {...light}>
+      <path d="M4 20V4" />
+      <path d="M4 20h16" />
+      <path d="M8.5 20v-6M13 20v-9.5M17.5 20V7" />
     </svg>
   )
 }

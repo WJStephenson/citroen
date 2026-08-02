@@ -16,20 +16,39 @@ only — you already have the domain, tunnel, and nginx container.
 
 ## What it does
 
-- **Battery ring** — state of charge, remaining range, charging state, cabin
-  temperature, odometer, and 12V auxiliary voltage.
+- **Reorderable tile grid** — one scrolling dashboard rather than tabs. Long-press
+  any tile (or tap the rearrange button in the app bar) to pick it up and drag it
+  somewhere else; the order is kept in `localStorage` under `ec4.widgetOrder`.
+  Arrow keys move the focused tile when a keyboard is attached.
+- **Charge** — the lead tile fills from the bottom to the state of charge behind a
+  wave, and cuts the reading in half at the waterline. Colour carries severity
+  (mint / amber / red), and it drifts while energy is actually going in.
+- **Readings** — charging state as a four-step plug-in sequence, cabin
+  temperature, odometer, and 12V auxiliary voltage on a dial with the band the
+  number has to stay inside.
+- **A shape per tile**, after Material 3 Expressive's shape set, so the grid is
+  legible before a word of it is read: lobed silhouettes for the soft or
+  radiating quantities (cabin warmth, moving air, light, sound), a circle where
+  the tile's own edge is an instrument (12V), a domed top for anything with a
+  fill line in it (charge, and the limit it fills to), and mirrored diagonal
+  corners for the counted numbers. Tiles holding a slider or a chart stay
+  rectangular — a shaped tile has no corners to put them in.
 - **Pre-conditioning toggle** — with a non-blocking overlay that counts elapsed
   seconds against the 30–90s cellular wake-up window, so a slow response reads
   as normal rather than broken.
-- **Charge limit** — 60 / 80 / 90 / 100% presets, via PSACC's local charge
-  control (needs it configured for your VIN — see below).
+- **Charge limit** — swipe the tile up and down to set the maximum, 50–100% in
+  5% steps, via PSACC's local charge control (needs it configured for your VIN —
+  see below). Nothing is sent while the finger is moving; releasing commits it,
+  so one decision is one command rather than a dozen wake-ups. Hold still
+  instead of swiping and the tile is picked up for rearranging.
 - **Charging window** — separate start and stop times, so the car only charges
   inside your off-peak tariff window. These are two unrelated mechanisms in the
   bridge and can fail independently, so each has its own Set button. Both can be
   cleared: *Charge now* cancels a deferred start, *Clear stop* removes the stop
   time.
-- **Find the car** — flash the lights or sound the horn (the horn asks for a
-  second tap).
+- **Lights** and **Horn** — one tile each, because they are not the same kind of
+  decision: the lights are harmless and fire on the first tap, the horn asks for
+  a second one.
 - **Charging history** — energy added per session, charted from
   `/vehicles/chargings`, with a table view.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
@@ -194,7 +213,9 @@ src/
 ├── lock/              WebAuthn / PIN local lock
 ├── units.ts           km/mi and °C/°F conversion; display only
 └── components/        presentational; none of them touch a Raw type
-    └── ChargingHistoryCard.tsx   hand-rolled SVG chart, no chart library
+    ├── Widget.tsx      the tile shell every section is built from
+    ├── WidgetGrid.tsx  long-press pick-up, FLIP-animated reorder, autoscroll
+    └── ChargingHistoryWidget.tsx  hand-rolled SVG chart, no chart library
 public/sw.js           cache-first shell, network-only /api/*
 ```
 

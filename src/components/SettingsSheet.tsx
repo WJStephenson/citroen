@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useUnits } from '../hooks/useUnits'
 import { setTheme } from '../theme'
 import { setUnits } from '../units'
+import * as notify from '../notify'
 import {
   clearLock,
   configuredMethod,
@@ -23,6 +24,7 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  const [statusNote, setStatusNote] = useState(notify.isEnabled())
   // Units and theme are applied immediately rather than on Save — the change
   // is visible behind the sheet, so waiting for a reload would feel broken.
   const units = useUnits()
@@ -62,6 +64,18 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
     setMethod(configuredMethod())
     onLockChanged()
     setNotice('PIN lock enabled.')
+  }
+
+  const toggleStatusNote = async (on: boolean) => {
+    if (!on) {
+      await notify.disable()
+      setStatusNote(false)
+      setNotice('Status notification off.')
+      return
+    }
+    const result = await notify.enable()
+    setStatusNote(notify.isEnabled())
+    setNotice(result.message)
   }
 
   const disableLock = () => {
@@ -179,6 +193,41 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
         <p className="card-note">
           Display only — the bridge always reports km and °C, and nothing sent to the car is
           converted.
+        </p>
+
+        <h3>Status notification</h3>
+        <div className="unit-row">
+          <span>Show charge in the shade</span>
+          <div className="segmented is-pair" role="group" aria-label="Status notification">
+            <button
+              type="button"
+              className={`segment ${statusNote ? 'is-selected' : ''}`}
+              aria-pressed={statusNote}
+              disabled={!notify.isSupported() || notify.isBlocked()}
+              onClick={() => void toggleStatusNote(true)}
+            >
+              On
+            </button>
+            <button
+              type="button"
+              className={`segment ${!statusNote ? 'is-selected' : ''}`}
+              aria-pressed={!statusNote}
+              disabled={!notify.isSupported()}
+              onClick={() => void toggleStatusNote(false)}
+            >
+              Off
+            </button>
+          </div>
+        </div>
+        <p className="card-note">
+          {notify.isBlocked()
+            ? 'Notifications are blocked for this site — allow them in the browser’s site settings first.'
+            : !notify.isSupported()
+              ? 'Only available in the installed app over HTTPS.'
+              : 'A silent notification showing charge and range, updated every time the app polls. ' +
+                'Android has no widget or icon badge for web apps, so this is the only way to see ' +
+                'the charge without opening the app. It refreshes in the background roughly twice a ' +
+                'day at best, so trust the timestamp on it — and pull to refresh for live state.'}
         </p>
 
         <h3>App lock</h3>

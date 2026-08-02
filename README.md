@@ -35,6 +35,9 @@ only — you already have the domain, tunnel, and nginx container.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
 - **Pull-to-refresh** — the primary way to get live state, because background
   polling is deliberately throttled (see [Battery safety](#battery-safety)).
+- **Status notification** — an opt-in silent notification showing charge and
+  range in the notification shade, so you can see the state without opening the
+  app. See [Why there is no widget](#why-there-is-no-widget).
 - **App lock** — WebAuthn biometrics or a local PIN, re-armed when the app has
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
@@ -180,6 +183,69 @@ The doc's §5 constraint drives real behaviour in the code, not just a comment:
 
 ---
 
+## Why there is no widget
+
+The obvious ask for a car app is a home-screen widget, or at least the charge
+percentage on the app icon. Neither is possible from a PWA on Android, for three
+independent reasons:
+
+- **No widget API.** The `widgets` manifest member exists in the spec but is
+  implemented only by Edge on Windows 11. Android widgets are `RemoteViews`
+  trees built from a restricted set of native view classes, which a web app has
+  no way to supply.
+- **No badge API.** `navigator.setAppBadge()` — exactly the right API — works on
+  desktop Chrome/Edge and on iOS 16.4+ installed web apps. Chrome for Android
+  has never shipped it.
+- **The icon is frozen at install.** "Add to home screen" mints a signed WebAPK
+  server-side with the manifest icons compiled in as Android resources. Chrome
+  re-mints it when the manifest changes, but only on launch and at most about
+  once a day, so a dynamically-rendered icon would show yesterday's charge.
+
+What *is* available is a service-worker notification with a fixed `tag`, which
+sits in the shade and on the lock screen and is replaced in place rather than
+stacking. That is what the **Status notification** toggle in Settings turns on.
+
+It updates from two places, and only one of them is dependable:
+
+| | When | How fresh |
+|---|---|---|
+| App open | every successful poll | current |
+| App closed | `periodicsync` | ~12h at best |
+
+Chrome floors periodic background sync at roughly **12 hours** whatever
+`minInterval` is requested, requires the app to be installed, and weights it by
+site engagement — `registerPeriodicSync()` in `src/notify.ts` reports whether it
+was actually granted so Settings can say so rather than implying a cadence the
+device will not honour. The notification therefore always carries the timestamp
+of the reading. A bare percentage that might be twelve hours old would be worse
+than no number at all.
+
+Three deliberate choices:
+
+- **`silent: true`, `renotify: false`.** This is a display surface, not an
+  alert. Buzzing the phone every 20-minute poll would get it switched off within
+  a day.
+- **The background refresh always uses `?from_cache=1`.** It fires on a timer
+  with nobody watching, which is precisely the pattern
+  [Battery safety](#battery-safety) exists to prevent. It reads the bridge's
+  stored state and costs the car nothing.
+- **All formatting lives in `public/sw.js`, not the bundle.** The background
+  path has to render identically to the foreground one, and `sw.js` is served
+  raw from `public/` so it cannot import from `src/`. Putting the app in charge
+  of formatting would have meant two implementations that drift; instead the app
+  posts the state over and the worker is the only thing that renders it. The
+  worker does carry a four-field mirror of `normalise()` for the background
+  fetch — if it ever needs more than that, the right fix is a route on the
+  bridge, not a second normaliser.
+
+A native widget is still possible, but not from this repo: wrap the PWA with
+Bubblewrap into a TWA and add an `AppWidgetProvider`, or drive KWGT from Tasker.
+Both need a Cloudflare Access service token, since neither has the browser's
+`CF_Authorization` cookie — and that token should be scoped to a read-only
+location rather than the whole hostname.
+
+---
+
 ## Architecture notes
 
 ```
@@ -192,6 +258,7 @@ src/
 │   ├── useCommands.ts optimistic updates + the 30-90s latency window
 │   └── usePullToRefresh.ts
 ├── lock/              WebAuthn / PIN local lock
+├── notify.ts          status-notification opt-in; formatting lives in sw.js
 ├── units.ts           km/mi and °C/°F conversion; display only
 └── components/        presentational; none of them touch a Raw type
     └── ChargingHistoryCard.tsx   hand-rolled SVG chart, no chart library

@@ -43,3 +43,32 @@ export function SettingsIcon() {
     </svg>
   )
 }
+
+export function HomeIcon() {
+  return (
+    <svg {...base}>
+      <path d="M4 11.5 12 4l8 7.5" />
+      <path d="M6 10v9h12v-9" />
+    </svg>
+  )
+}
+
+export function CarIcon() {
+  return (
+    <svg {...base}>
+      <path d="M4 16v-3.5L6.5 7h11L20 12.5V16" />
+      <path d="M4 16h16" />
+      <path d="M4 16v2.5M20 16v2.5" />
+      <circle cx="8" cy="16" r="1.6" />
+      <circle cx="16" cy="16" r="1.6" />
+    </svg>
+  )
+}
+
+export function BoltIcon() {
+  return (
+    <svg {...base}>
+      <path d="M13 3 5 13.5h5.5L10 21l8-10.5h-5.5L13 3Z" />
+    </svg>
+  )
+}

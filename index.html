@@ -21,6 +21,17 @@
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <meta name="theme-color" content="#121212" />
     <meta name="color-scheme" content="dark" />
+    <script>
+      // Sets the theme before the stylesheet paints, so a light-mode choice
+      // never flashes dark first. Kept in sync with src/theme.ts.
+      (function () {
+        var theme = localStorage.getItem('ec4.theme') === 'light' ? 'light' : 'dark'
+        document.documentElement.dataset.theme = theme
+        if (theme === 'light') {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f2f2f4')
+        }
+      })()
+    </script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

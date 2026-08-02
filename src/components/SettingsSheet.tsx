@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { MIN_POLL_MINUTES, getPollMinutes, getVin, setPollMinutes, setVin } from '../config'
+import { useTheme } from '../hooks/useTheme'
 import { useUnits } from '../hooks/useUnits'
+import { setTheme } from '../theme'
 import { setUnits } from '../units'
 import {
   clearLock,
@@ -21,9 +23,10 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
-  // Units are applied immediately rather than on Save — the change is visible
-  // behind the sheet, so waiting for a reload would feel broken.
+  // Units and theme are applied immediately rather than on Save — the change
+  // is visible behind the sheet, so waiting for a reload would feel broken.
   const units = useUnits()
+  const theme = useTheme()
 
   const save = () => {
     setVin(vin)
@@ -106,6 +109,29 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
           Polling below {MIN_POLL_MINUTES} minutes keeps the car's ECUs awake and flattens the 12V
           battery. Pull down on the dashboard whenever you want live state.
         </p>
+
+        <h3>Appearance</h3>
+        <div className="unit-row">
+          <span>Theme</span>
+          <div className="segmented is-pair" role="group" aria-label="Theme">
+            <button
+              type="button"
+              className={`segment ${theme === 'dark' ? 'is-selected' : ''}`}
+              aria-pressed={theme === 'dark'}
+              onClick={() => setTheme('dark')}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              className={`segment ${theme === 'light' ? 'is-selected' : ''}`}
+              aria-pressed={theme === 'light'}
+              onClick={() => setTheme('light')}
+            >
+              Light
+            </button>
+          </div>
+        </div>
 
         <h3>Units</h3>
         <div className="unit-row">

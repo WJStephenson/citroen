@@ -57,7 +57,7 @@ export function FindCarCard({ commands }: { commands: Commands }) {
       <div className="row">
         <button
           type="button"
-          className={`button is-wide ${commands.active?.kind === 'lights' ? 'is-busy' : ''}`}
+          className={`button is-wide ${commands.active?.kind === 'lights' ? 'is-flashing' : ''}`}
           onClick={lights}
           disabled={disabled}
         >
@@ -66,7 +66,7 @@ export function FindCarCard({ commands }: { commands: Commands }) {
         <button
           type="button"
           className={`button is-wide ${armed ? 'is-armed' : ''} ${
-            commands.active?.kind === 'horn' ? 'is-busy' : ''
+            commands.active?.kind === 'horn' ? 'is-sounding' : ''
           }`}
           onClick={horn}
           disabled={disabled}

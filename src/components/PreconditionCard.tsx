@@ -21,7 +21,7 @@ export function PreconditionCard({ state, commands }: Props) {
     })
 
   return (
-    <section className="card">
+    <section className={`card ${on ? 'is-active' : ''}`}>
       <header className="card-head">
         <div>
           <h2>Pre-conditioning</h2>

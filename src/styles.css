@@ -1,7 +1,8 @@
 /*
- * Dark-only, per the manifest theme (#121212). The app is installed to a phone
- * home screen and runs in standalone mode, so everything is sized for thumbs:
- * 48px minimum hit targets, safe-area insets honoured.
+ * Dark by default, with an opt-in light theme (Settings > Appearance). The
+ * app is installed to a phone home screen and runs in standalone mode, so
+ * everything is sized for thumbs regardless of theme: 48px minimum hit
+ * targets, safe-area insets honoured.
  */
 
 :root {
@@ -17,7 +18,35 @@
   --danger: #ef5f5f;
   --radius: 18px;
 
+  /*
+   * --accent/--warn/--danger are tuned to sit on this dark surface, including
+   * as small-text foreground (armed pull-indicator, sheet notices, nav
+   * selection). The light theme below needs darker, more saturated versions
+   * for that same text role — brightening the surface without these would
+   * make green-on-white, amber-on-white etc. illegible — while fills like
+   * .button.is-primary keep using the bright base color against fixed dark
+   * text. Identity here; only the light override differs.
+   */
+  --accent-fg: var(--accent);
+  --warn-fg: var(--warn);
+  --danger-fg: var(--danger);
+
   color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #f2f2f4;
+  --surface: #ffffff;
+  --surface-2: #ececef;
+  --track: #dcdce1;
+  --text: #1c1c1e;
+  --muted: #6b6b70;
+
+  --accent-fg: #1c8a5c;
+  --warn-fg: #96650a;
+  --danger-fg: #c33232;
+
+  color-scheme: light;
 }
 
 * {
@@ -32,6 +61,9 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: contain;
+  /* Belt-and-braces: nothing on this page should ever be wider than the
+     viewport, no matter what a child element does. */
+  overflow-x: hidden;
 }
 
 body {
@@ -138,7 +170,7 @@ button {
 }
 
 .pull-indicator.is-armed {
-  color: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* ---------- car hero ---------- */
@@ -148,6 +180,7 @@ button {
   display: grid;
   place-items: center;
   margin: 0.25rem 0 0.5rem;
+  padding: 0.75rem 0;
 }
 
 /*
@@ -282,7 +315,89 @@ button {
 }
 
 .status-item.is-warn dd {
-  color: var(--warn);
+  color: var(--warn-fg);
+}
+
+/* ---------- app tabs ---------- */
+
+/*
+ * Native horizontal scroll with snap, not custom touch-move math: it gets
+ * swipe-between-pages, rubber-banding and vertical-scroll passthrough for
+ * free, and behaves the same as every other scrollable list in the OS.
+ */
+.tabs-track {
+  display: flex;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tabs-track::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs-panel {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/*
+ * Floating pill, not a full-width bar — the wrapper spans the viewport but
+ * stays non-blocking (like .overlay) so only the pill itself catches taps.
+ */
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.bottom-nav-card {
+  display: flex;
+  gap: 0.375rem;
+  width: fit-content;
+  background: rgba(38, 38, 41, 0.96);
+  backdrop-filter: blur(12px);
+  border-radius: 999px;
+  padding: 0.375rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+  pointer-events: auto;
+}
+
+.bottom-nav-item {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+}
+
+.bottom-nav-item svg {
+  width: 22px;
+  height: 22px;
+}
+
+.bottom-nav-item.is-selected {
+  background: var(--surface-2);
+  color: var(--accent-fg);
 }
 
 /* ---------- cards ---------- */
@@ -292,6 +407,26 @@ button {
   border-radius: var(--radius);
   padding: 1rem;
   margin-bottom: 0.75rem;
+}
+
+/*
+ * A sustained state (preconditioning running, etc), not a transient one —
+ * distinct from .is-busy, which only lasts while a command is in flight.
+ */
+.card.is-active {
+  position: relative;
+  box-shadow: 0 0 0 1px var(--accent-dim);
+  animation: card-glow 2.6s ease-in-out infinite;
+}
+
+@keyframes card-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--accent-dim);
+  }
+  50% {
+    box-shadow: 0 0 18px 1px rgb(61 220 151 / 35%);
+  }
 }
 
 .card-head {
@@ -327,6 +462,7 @@ button {
 
 .row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   margin-top: 0.75rem;
@@ -348,10 +484,22 @@ button {
 
 .switch.is-on {
   background: var(--accent-dim);
+  animation: switch-glow 2.6s ease-in-out infinite;
 }
 
 .switch:disabled {
   opacity: 0.6;
+}
+
+/* A slow breathing glow — "this is on and running", not "something is loading". */
+@keyframes switch-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(61 220 151 / 35%);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px rgb(61 220 151 / 55%);
+  }
 }
 
 .switch-thumb {
@@ -476,8 +624,55 @@ button {
 }
 
 .button.is-armed {
-  border-color: var(--warn);
-  color: var(--warn);
+  border-color: var(--warn-fg);
+  color: var(--warn-fg);
+}
+
+/* Flashing the car's lights — a hard strobe cut, not a soft fade. */
+.button.is-flashing {
+  animation: button-strobe 0.5s steps(1, end) infinite;
+}
+
+@keyframes button-strobe {
+  0%,
+  49% {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06120c;
+  }
+  50%,
+  100% {
+    background: var(--surface-2);
+    border-color: var(--track);
+    color: var(--text);
+  }
+}
+
+/* Sounding the horn — an expanding ring, like a sound wave leaving the button. */
+.button.is-sounding {
+  position: relative;
+  overflow: visible;
+}
+
+.button.is-sounding::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  animation: horn-ripple 0.9s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes horn-ripple {
+  from {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1.18);
+    opacity: 0;
+  }
 }
 
 .time-input {
@@ -631,19 +826,24 @@ button {
   cursor: pointer;
 }
 
+/*
+ * Tinted via color-mix from the surface rather than a fixed hex: a dark tint
+ * on the dark surface and a light pastel tint on the light surface, from the
+ * same two formulas, rather than a second hardcoded set of colors per theme.
+ */
 .banner.is-info {
-  background: #1b3a2c;
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-fg) 18%, var(--surface));
+  color: var(--accent-fg);
 }
 
 .banner.is-warn {
-  background: #3a2f16;
-  color: var(--warn);
+  background: color-mix(in srgb, var(--warn-fg) 20%, var(--surface));
+  color: var(--warn-fg);
 }
 
 .banner.is-error {
-  background: #3a1e1e;
-  color: #ffb4b4;
+  background: color-mix(in srgb, var(--danger-fg) 18%, var(--surface));
+  color: var(--danger-fg);
   cursor: default;
 }
 
@@ -651,7 +851,7 @@ button {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  bottom: calc(env(safe-area-inset-bottom) + 5rem);
   display: flex;
   justify-content: center;
   padding: 0 1rem;
@@ -711,7 +911,7 @@ button {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 5.5rem);
+  bottom: calc(env(safe-area-inset-bottom) + 9rem);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -836,7 +1036,7 @@ button {
 
 .lock-error {
   margin-top: 0.75rem;
-  color: var(--danger);
+  color: var(--danger-fg);
   font-size: 0.875rem;
 }
 
@@ -872,7 +1072,9 @@ button {
 
 .sheet {
   width: min(100%, 34rem);
+  max-width: 100vw;
   max-height: 88dvh;
+  overflow-x: hidden;
   overflow-y: auto;
   background: var(--surface);
   border-radius: 22px 22px 0 0;
@@ -926,7 +1128,7 @@ button {
 .sheet-notice {
   margin: 0.875rem 0 0;
   font-size: 0.8125rem;
-  color: var(--accent);
+  color: var(--accent-fg);
 }
 
 .sheet-actions {

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BatteryBar } from './components/BatteryBar'
 import { ChargeLimitCard } from './components/ChargeLimitCard'
 import { CommandOverlay } from './components/CommandOverlay'
+import { ControlTabs } from './components/ControlTabs'
 import { FindCarCard } from './components/FindCarCard'
-import { RefreshIcon, SettingsIcon } from './components/Icons'
+import { BoltIcon, CarIcon, HomeIcon, RefreshIcon, SettingsIcon } from './components/Icons'
 import { ChargeWindowCard } from './components/ChargeWindowCard'
 import { ChargingHistoryCard } from './components/ChargingHistoryCard'
 import { CarHero } from './components/CarHero'
@@ -121,26 +122,55 @@ export default function App() {
             <div className="skeleton-bar" />
           </div>
         ) : vehicle.state ? (
-          <>
-            <CarHero />
-            <BatteryBar
-              level={vehicle.state.battery}
-              range={vehicle.state.range}
-              charging={vehicle.state.charging}
-              stale={stale}
-            />
-            {vehicle.state.reportedAt && (
-              <p className="reported-at">
-                Car last reported {relativeTime(vehicle.state.reportedAt)}
-              </p>
-            )}
-            <StatusStrip state={vehicle.state} />
-            <PreconditionCard state={vehicle.state} commands={commands} />
-            <ChargeLimitCard commands={commands} />
-            <ChargeWindowCard commands={commands} />
-            <FindCarCard commands={commands} />
-            <ChargingHistoryCard />
-          </>
+          <ControlTabs
+            tabs={[
+              {
+                id: 'home',
+                label: 'Home',
+                icon: <HomeIcon />,
+                content: (
+                  <>
+                    <CarHero />
+                    <BatteryBar
+                      level={vehicle.state.battery}
+                      range={vehicle.state.range}
+                      charging={vehicle.state.charging}
+                      stale={stale}
+                    />
+                    {vehicle.state.reportedAt && (
+                      <p className="reported-at">
+                        Car last reported {relativeTime(vehicle.state.reportedAt)}
+                      </p>
+                    )}
+                    <StatusStrip state={vehicle.state} />
+                  </>
+                ),
+              },
+              {
+                id: 'control',
+                label: 'Car control',
+                icon: <CarIcon />,
+                content: (
+                  <>
+                    <PreconditionCard state={vehicle.state} commands={commands} />
+                    <FindCarCard commands={commands} />
+                  </>
+                ),
+              },
+              {
+                id: 'charging',
+                label: 'Charge management',
+                icon: <BoltIcon />,
+                content: (
+                  <>
+                    <ChargeLimitCard commands={commands} />
+                    <ChargeWindowCard commands={commands} />
+                    <ChargingHistoryCard />
+                  </>
+                ),
+              },
+            ]}
+          />
         ) : (
           <div className="empty">
             <p>No vehicle data yet.</p>

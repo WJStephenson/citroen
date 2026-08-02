@@ -18,6 +18,24 @@
   --danger: #ef5f5f;
   --radius: 18px;
 
+  /* Layout rhythm. --page-pad is the app's edge padding; the swipe track
+     reuses it so panels stay aligned to it while gutters open between them. */
+  --page-pad: 1rem;
+  --page-gutter: 1.75rem;
+  /* Room for glows/rings to paint inside a clipped scroll container. */
+  --bleed: 10px;
+
+  /* One height and one radius for every interactive control, so buttons,
+     segments and time fields line up on any row they share. 48px is the
+     comfortable touch target; the set had drifted between 44 and 46. */
+  --control-h: 48px;
+  --radius-control: 14px;
+
+  /* Cards sat 0.75rem apart, which read as one continuous slab while
+     scrolling — the gap has to be clearly larger than a card's own padding
+     for the boundary between them to register. */
+  --card-gap: 1.125rem;
+
   /*
    * --accent/--warn/--danger are tuned to sit on this dark surface, including
    * as small-text foreground (armed pull-indicator, sheet notices, nav
@@ -84,7 +102,7 @@ button {
   position: relative; /* containing block for .pull-indicator */
   max-width: 34rem;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 0.75rem) 1rem
+  padding: calc(env(safe-area-inset-top) + 0.75rem) var(--page-pad)
     calc(env(safe-area-inset-bottom) + 6rem);
   transition: transform 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
@@ -318,6 +336,34 @@ button {
   color: var(--warn-fg);
 }
 
+/* ---------- ambient command layer ---------- */
+
+/*
+ * Painted under the whole app while a command is in flight. Inert by
+ * construction: fixed, behind the content, and pointer-events: none, so it can
+ * never swallow a tap meant for a control underneath it.
+ */
+.ambient {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  animation: ambient-in 420ms ease-out;
+}
+
+@keyframes ambient-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The app sits above the ambient layer. */
+.app {
+  z-index: 1;
+}
+
 /* ---------- app tabs ---------- */
 
 /*
@@ -328,6 +374,29 @@ button {
 .tabs-track {
   display: flex;
   align-items: flex-start;
+
+  /*
+   * The gutter you see mid-swipe. Without it the two pages butt together and
+   * the swipe reads as one long sheet sliding past, rather than as separate
+   * screens. The track is pulled out to the full viewport width and given the
+   * page padding back, so each panel still lines up with the app's 1rem edge
+   * while a real gap opens up between them.
+   */
+  gap: var(--page-gutter);
+  margin-inline: calc(var(--page-pad) * -1);
+  padding-inline: var(--page-pad);
+  scroll-padding-inline: var(--page-pad);
+
+  /*
+   * overflow-x: auto forces the cross axis to clip (per spec, `visible`
+   * computes to `auto` when the other axis is not visible), so anything that
+   * paints outside a panel — an active card's glow, a button ripple — would be
+   * cut off at the panel's top and bottom edge. This padding gives that paint
+   * room inside the clip; the negative margin keeps the layout where it was.
+   */
+  padding-block: var(--bleed);
+  margin-block: calc(var(--bleed) * -1);
+
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
@@ -405,27 +474,50 @@ button {
 .card {
   background: var(--surface);
   border-radius: var(--radius);
-  padding: 1rem;
-  margin-bottom: 0.75rem;
+  padding: 1.125rem 1rem;
+  margin-bottom: var(--card-gap);
+}
+
+.card:last-child {
+  margin-bottom: 0;
 }
 
 /*
  * A sustained state (preconditioning running, etc), not a transient one —
  * distinct from .is-busy, which only lasts while a command is in flight.
+ *
+ * The ring is static and the *inside* is what breathes. The previous version
+ * animated an 18px outer glow, which bled outside the card and was then sliced
+ * off by the swipe track's clip — the glow visibly squared off at the panel
+ * edge. Keeping the motion inside the card's own box means nothing can be
+ * clipped, and it reads as calmer next to the surrounding cards.
  */
 .card.is-active {
   position: relative;
   box-shadow: 0 0 0 1px var(--accent-dim);
-  animation: card-glow 2.6s ease-in-out infinite;
+  overflow: hidden;
 }
 
-@keyframes card-glow {
+.card.is-active::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 80% at 50% 0%,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent 70%
+  );
+  animation: card-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes card-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 1px var(--accent-dim);
+    opacity: 0.35;
   }
   50% {
-    box-shadow: 0 0 18px 1px rgb(61 220 151 / 35%);
+    opacity: 1;
   }
 }
 
@@ -517,8 +609,58 @@ button {
   transform: translateX(24px);
 }
 
-.switch.is-busy .switch-thumb {
-  animation: pulse 1.2s ease-in-out infinite;
+/*
+ * BUSY vs DISABLED — these mean different things and must not look alike.
+ *
+ * Disabled = unavailable, so it recedes. Busy = this control is doing the
+ * thing you just asked for, so it should be the most present item on screen,
+ * not the dimmest. The old treatment animated opacity on the whole element and
+ * broke both ways:
+ *
+ *   - A busy *button* is also `disabled`. The pulse keyframe only declared
+ *     50%, so the implicit 0%/100% inherited the disabled 0.5 — it flickered
+ *     0.5 -> 0.45 -> 0.5 and read as nothing at all.
+ *   - A busy *group* (the segmented row) is not itself disabled, so it swung
+ *     the full 1 -> 0.45 while its children already sat at 0.55, compounding
+ *     to near-invisible and strobing the whole block.
+ *
+ * Replaced with one indeterminate bar, clipped to the control's own box so it
+ * can never bleed past its edges, reading identically on every control.
+ */
+.is-busy {
+  position: relative;
+  overflow: hidden;
+  /* Busy is foreground; beat the :disabled dimming it is combined with. */
+  opacity: 1 !important;
+}
+
+.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: currentColor;
+  transform-origin: left center;
+  animation: indeterminate 1.15s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%) scaleX(0.35);
+  }
+  50% {
+    transform: translateX(0) scaleX(0.6);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.35);
+  }
+}
+
+/* The switch is a fully rounded pill, so a square-ended bar would poke into
+   the corners it is clipped against. */
+.switch.is-busy::after {
+  height: 3px;
+  border-radius: 999px;
 }
 
 @keyframes pulse {
@@ -535,15 +677,16 @@ button {
 }
 
 .segment {
-  height: 46px;
+  height: var(--control-h);
   border: 1px solid var(--track);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: transparent;
   font-size: 0.9375rem;
   cursor: pointer;
   transition:
     background 150ms ease,
-    border-color 150ms ease;
+    border-color 150ms ease,
+    transform 120ms ease;
 }
 
 .segment.is-selected {
@@ -557,9 +700,6 @@ button {
   opacity: 0.55;
 }
 
-.segmented.is-busy {
-  animation: pulse 1.2s ease-in-out infinite;
-}
 
 .segmented.is-pair {
   grid-template-columns: repeat(2, minmax(4.5rem, 1fr));
@@ -596,12 +736,18 @@ button {
 }
 
 .button {
-  min-height: 46px;
+  min-height: var(--control-h);
   padding: 0 1.1rem;
   border: 1px solid var(--track);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface-2);
+  font-size: 0.9375rem;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 120ms ease;
 }
 
 .button.is-primary {
@@ -615,9 +761,6 @@ button {
   opacity: 0.5;
 }
 
-.button.is-busy {
-  animation: pulse 1.2s ease-in-out infinite;
-}
 
 .button.is-wide {
   flex: 1;
@@ -628,61 +771,82 @@ button {
   color: var(--warn-fg);
 }
 
-/* Flashing the car's lights — a hard strobe cut, not a soft fade. */
-.button.is-flashing {
-  animation: button-strobe 0.5s steps(1, end) infinite;
-}
-
-@keyframes button-strobe {
-  0%,
-  49% {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #06120c;
-  }
-  50%,
-  100% {
-    background: var(--surface-2);
-    border-color: var(--track);
-    color: var(--text);
-  }
-}
-
-/* Sounding the horn — an expanding ring, like a sound wave leaving the button. */
+/*
+ * The lights and horn now express themselves through the full-screen ambient
+ * canvas, so the button only has to say "this one is working" — the same
+ * indeterminate bar every other busy control uses. The previous per-button
+ * strobe and expanding ring competed with the ambient layer, and the ring
+ * escaped the button's box to be clipped by the swipe track.
+ */
+.button.is-flashing,
 .button.is-sounding {
   position: relative;
-  overflow: visible;
+  overflow: hidden;
+  opacity: 1 !important;
 }
 
+.button.is-flashing::after,
 .button.is-sounding::after {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 2px solid var(--accent);
-  animation: horn-ripple 0.9s ease-out infinite;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: currentColor;
+  transform-origin: left center;
+  animation: indeterminate 1.15s ease-in-out infinite;
   pointer-events: none;
-}
-
-@keyframes horn-ripple {
-  from {
-    transform: scale(1);
-    opacity: 0.8;
-  }
-  to {
-    transform: scale(1.18);
-    opacity: 0;
-  }
 }
 
 .time-input {
   flex: 1;
-  min-height: 46px;
+  min-height: var(--control-h);
   padding: 0 0.75rem;
   border: 1px solid var(--track);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--surface-2);
+  font-size: 1rem;
   font-variant-numeric: tabular-nums;
+  transition: border-color 150ms ease;
+}
+
+.time-input:focus {
+  border-color: var(--accent-dim);
+}
+
+/* The native clock affordance is near-invisible on a dark field. Recolour it
+   rather than hide it — it is what opens the picker. */
+.time-input::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+:root:not([data-theme='light']) .time-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+/*
+ * Press feedback. Touch has no hover, so what happens under the finger is the
+ * only tactile signal there is — without it every control feels dead.
+ */
+.button:not(:disabled):active,
+.segment:not(:disabled):active,
+.icon-button:not(:disabled):active,
+.bottom-nav-item:active {
+  transform: scale(0.97);
+}
+
+/* Keyboard focus was previously invisible everywhere. The ring sits outside
+   the control so showing it never reflows the layout. */
+.button:focus-visible,
+.segment:focus-visible,
+.icon-button:focus-visible,
+.switch:focus-visible,
+.bottom-nav-item:focus-visible,
+.time-input:focus-visible,
+.pin-input:focus-visible,
+.field input:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
 }
 
 /* ---------- charts ---------- */

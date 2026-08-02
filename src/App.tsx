@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AmbientCanvas, type AmbientMode } from './components/AmbientCanvas'
 import { BatteryBar } from './components/BatteryBar'
 import { ChargeLimitCard } from './components/ChargeLimitCard'
 import { CommandOverlay } from './components/CommandOverlay'
@@ -59,134 +60,155 @@ export default function App() {
 
   const stale = vehicle.fetchedAt !== null && Date.now() - vehicle.fetchedAt.getTime() > 45 * 60_000
 
+  /*
+   * A command in flight owns the screen; otherwise pre-conditioning that is
+   * actually running keeps a quieter version of its own ambience, since that
+   * state can persist for many minutes and should not be as loud as an action
+   * you just took.
+   */
+  const activeKind = commands.active?.kind
+  const ambient: AmbientMode =
+    activeKind === 'precondition' || activeKind === 'lights' || activeKind === 'horn'
+      ? activeKind
+      : vehicle.state?.preconditioning === 'on'
+        ? 'precondition'
+        : null
+  const ambientIntensity = commands.active ? 1 : 0.4
+
   return (
-    <div className="app" style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}>
+    <>
+      <AmbientCanvas mode={ambient} intensity={ambientIntensity} />
       <div
-        className={`pull-indicator ${pull.armed ? 'is-armed' : ''}`}
-        style={{ opacity: pull.pull / pull.threshold }}
-        aria-hidden="true"
+        className="app"
+        style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}
       >
-        {pull.armed ? 'Release to refresh' : 'Pull to refresh'}
-      </div>
-
-      <header className="app-bar">
-        <div>
-          <h1>ë-C4</h1>
-          <p className="app-bar-sub">
-            {vehicle.refreshing ? 'Refreshing…' : `Updated ${relativeTime(vehicle.fetchedAt)}`}
-          </p>
+        <div
+          className={`pull-indicator ${pull.armed ? 'is-armed' : ''}`}
+          style={{ opacity: pull.pull / pull.threshold }}
+          aria-hidden="true"
+        >
+          {pull.armed ? 'Release to refresh' : 'Pull to refresh'}
         </div>
-        <div className="app-bar-actions">
-          <button
-            type="button"
-            className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
-            onClick={() => void liveRefresh()}
-            disabled={vehicle.refreshing}
-            aria-label="Refresh vehicle state from the car"
-          >
-            <RefreshIcon />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
-          >
-            <SettingsIcon />
-          </button>
-        </div>
-      </header>
 
-      {updateReady && (
-        <button type="button" className="banner is-info" onClick={applyUpdate}>
-          A new version is ready — tap to reload
-        </button>
-      )}
-
-      {vinMissing && (
-        <button type="button" className="banner is-warn" onClick={() => setSettingsOpen(true)}>
-          No VIN configured — open Settings to add one
-        </button>
-      )}
-
-      {vehicle.error && (
-        <div className="banner is-error" role="alert">
-          {vehicle.error.message}
-        </div>
-      )}
-
-      <main className="content">
-        {vehicle.loading && !vehicle.state ? (
-          <div className="skeleton" aria-label="Loading vehicle state">
-            <div className="skeleton-car" />
-            <div className="skeleton-bar" />
+        <header className="app-bar">
+          <div>
+            <h1>ë-C4</h1>
+            <p className="app-bar-sub">
+              {vehicle.refreshing ? 'Refreshing…' : `Updated ${relativeTime(vehicle.fetchedAt)}`}
+            </p>
           </div>
-        ) : vehicle.state ? (
-          <ControlTabs
-            tabs={[
-              {
-                id: 'home',
-                label: 'Home',
-                icon: <HomeIcon />,
-                content: (
-                  <>
-                    <CarHero />
-                    <BatteryBar
-                      level={vehicle.state.battery}
-                      range={vehicle.state.range}
-                      charging={vehicle.state.charging}
-                      stale={stale}
-                    />
-                    {vehicle.state.reportedAt && (
-                      <p className="reported-at">
-                        Car last reported {relativeTime(vehicle.state.reportedAt)}
-                      </p>
-                    )}
-                    <StatusStrip state={vehicle.state} />
-                  </>
-                ),
-              },
-              {
-                id: 'control',
-                label: 'Car control',
-                icon: <CarIcon />,
-                content: (
-                  <>
-                    <PreconditionCard state={vehicle.state} commands={commands} />
-                    <FindCarCard commands={commands} />
-                  </>
-                ),
-              },
-              {
-                id: 'charging',
-                label: 'Charge management',
-                icon: <BoltIcon />,
-                content: (
-                  <>
-                    <ChargeLimitCard commands={commands} />
-                    <ChargeWindowCard commands={commands} />
-                    <ChargingHistoryCard />
-                  </>
-                ),
-              },
-            ]}
-          />
-        ) : (
-          <div className="empty">
-            <p>No vehicle data yet.</p>
-            <button type="button" className="button is-primary" onClick={() => void liveRefresh()}>
-              Try again
+          <div className="app-bar-actions">
+            <button
+              type="button"
+              className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
+              onClick={() => void liveRefresh()}
+              disabled={vehicle.refreshing}
+              aria-label="Refresh vehicle state from the car"
+            >
+              <RefreshIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+            >
+              <SettingsIcon />
             </button>
           </div>
+        </header>
+
+        {updateReady && (
+          <button type="button" className="banner is-info" onClick={applyUpdate}>
+            A new version is ready — tap to reload
+          </button>
         )}
-      </main>
 
-      {commands.active && <CommandOverlay command={commands.active} />}
-      <Toasts toasts={commands.toasts} onDismiss={commands.dismissToast} />
+        {vinMissing && (
+          <button type="button" className="banner is-warn" onClick={() => setSettingsOpen(true)}>
+            No VIN configured — open Settings to add one
+          </button>
+        )}
 
-      {settingsOpen && (
-        <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
-      )}
-    </div>
+        {vehicle.error && (
+          <div className="banner is-error" role="alert">
+            {vehicle.error.message}
+          </div>
+        )}
+
+        <main className="content">
+          {vehicle.loading && !vehicle.state ? (
+            <div className="skeleton" aria-label="Loading vehicle state">
+              <div className="skeleton-car" />
+              <div className="skeleton-bar" />
+            </div>
+          ) : vehicle.state ? (
+            <ControlTabs
+              tabs={[
+                {
+                  id: 'home',
+                  label: 'Home',
+                  icon: <HomeIcon />,
+                  content: (
+                    <>
+                      <CarHero />
+                      <BatteryBar
+                        level={vehicle.state.battery}
+                        range={vehicle.state.range}
+                        charging={vehicle.state.charging}
+                        stale={stale}
+                      />
+                      {vehicle.state.reportedAt && (
+                        <p className="reported-at">
+                          Car last reported {relativeTime(vehicle.state.reportedAt)}
+                        </p>
+                      )}
+                      <StatusStrip state={vehicle.state} />
+                    </>
+                  ),
+                },
+                {
+                  id: 'control',
+                  label: 'Car control',
+                  icon: <CarIcon />,
+                  content: (
+                    <>
+                      <PreconditionCard state={vehicle.state} commands={commands} />
+                      <FindCarCard commands={commands} />
+                    </>
+                  ),
+                },
+                {
+                  id: 'charging',
+                  label: 'Charge management',
+                  icon: <BoltIcon />,
+                  content: (
+                    <>
+                      <ChargeLimitCard commands={commands} />
+                      <ChargeWindowCard commands={commands} />
+                      <ChargingHistoryCard />
+                    </>
+                  ),
+                },
+              ]}
+            />
+          ) : (
+            <div className="empty">
+              <p>No vehicle data yet.</p>
+              <button type="button" className="button is-primary" onClick={() => void liveRefresh()}>
+                Try again
+              </button>
+            </div>
+          )}
+        </main>
+
+        {commands.active && <CommandOverlay command={commands.active} />}
+        <Toasts toasts={commands.toasts} onDismiss={commands.dismissToast} />
+
+        {settingsOpen && (
+          <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
+        )}
+      </div>
+    </>
   )
 }

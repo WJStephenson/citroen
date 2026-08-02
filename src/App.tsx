@@ -19,8 +19,6 @@ import { useCommands } from './hooks/useCommands'
 import { usePullToRefresh } from './hooks/usePullToRefresh'
 import { useVehicle } from './hooks/useVehicle'
 import { LockScreen } from './lock/LockScreen'
-import { useUnits } from './hooks/useUnits'
-import { publishStatus } from './notify'
 import { applyUpdate, registerServiceWorker } from './sw-register'
 
 /** "4 min ago" — the age of the data matters more than the clock time here. */
@@ -48,18 +46,7 @@ export default function App() {
   const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
   const pull = usePullToRefresh(liveRefresh, !lock.locked && !commands.active)
 
-  // Units are only read here so a change re-renders the status notification in
-  // the shade too, rather than leaving km behind after a switch to miles.
-  const units = useUnits()
-
   useEffect(() => registerServiceWorker(() => setUpdateReady(true)), [])
-
-  // The notification is the only glanceable surface Android gives a PWA, so it
-  // is refreshed from every successful poll. No-op unless enabled in Settings.
-  useEffect(() => {
-    if (!vehicle.state) return
-    void publishStatus(vehicle.state, vehicle.state.reportedAt ?? vehicle.fetchedAt)
-  }, [vehicle.state, vehicle.fetchedAt, units])
 
   // Keeps the "updated N min ago" label honest without re-polling the car.
   useEffect(() => {

@@ -119,6 +119,7 @@ export type CommandKind =
   | 'chargeNow'
   | 'horn'
   | 'lights'
+  | 'lock'
 
 export interface CommandResult {
   ok: boolean

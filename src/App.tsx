@@ -8,6 +8,7 @@ import { CommandOverlay } from './components/CommandOverlay'
 import { HornWidget, LightsWidget } from './components/FindCarWidgets'
 import { LayoutIcon, RefreshIcon, SettingsIcon } from './components/Icons'
 import { LocationWidget } from './components/LocationWidget'
+import { LockWidget } from './components/LockWidget'
 import { PreconditionWidget } from './components/PreconditionWidget'
 import { SettingsSheet } from './components/SettingsSheet'
 import {
@@ -121,6 +122,7 @@ export default function App() {
         },
         { id: 'lights', label: 'Lights', node: <LightsWidget commands={commands} /> },
         { id: 'horn', label: 'Horn', node: <HornWidget commands={commands} /> },
+        { id: 'lock', label: 'Locks', node: <LockWidget commands={commands} /> },
         {
           id: 'chargeLimit',
           label: 'Charge limit',

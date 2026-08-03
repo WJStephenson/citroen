@@ -61,6 +61,8 @@ export const endpoints = {
   horn: (vin: string, count: number) => `/horn/${encodeURIComponent(vin)}/${count}`,
   /** Duration is accepted but the car runs the lights for ~10s regardless. */
   lights: (vin: string, seconds: number) => `/lights/${encodeURIComponent(vin)}/${seconds}`,
+  lockDoor: (vin: string, lock: boolean) =>
+    `/lock_door/${encodeURIComponent(vin)}/${lock ? 1 : 0}`,
   chargings: () => '/vehicles/chargings',
 } as const
 
@@ -340,4 +342,15 @@ export function soundHorn(count = 1): Promise<CommandResult> {
 
 export function flashLights(seconds = 10): Promise<CommandResult> {
   return command(endpoints.lights(requireVin(), seconds), 'Lights flashed')
+}
+
+/**
+ * `get_vehicleinfo` reports no door-lock field, so the app cannot show whether
+ * the car is actually locked — this is fire-and-forget, same as horn/lights.
+ */
+export function setDoorLock(locked: boolean): Promise<CommandResult> {
+  return command(
+    endpoints.lockDoor(requireVin(), locked),
+    locked ? 'Doors locked' : 'Doors unlocked',
+  )
 }

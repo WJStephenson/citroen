@@ -171,6 +171,26 @@ export function HornIcon() {
   )
 }
 
+/** A closed padlock. */
+export function LockIcon() {
+  return (
+    <svg {...light}>
+      <rect x="5" y="11" width="14" height="9" rx="2.2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  )
+}
+
+/** A padlock with its shackle swung open. */
+export function UnlockIcon() {
+  return (
+    <svg {...light}>
+      <rect x="5" y="11" width="14" height="9" rx="2.2" />
+      <path d="M8 11V8a4 4 0 0 1 7.5-2.2" />
+    </svg>
+  )
+}
+
 /** Charge limit: a battery filled to a chosen mark. */
 export function LimitIcon() {
   return (

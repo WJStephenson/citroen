@@ -49,9 +49,20 @@ export default function App() {
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
   // A deliberate pull is the user asking the car itself, not the bridge cache.
   const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
-  // Rearranging is a drag that starts at the top of the page as often as not,
-  // so it would otherwise fight pull-to-refresh for the same gesture.
-  const pull = usePullToRefresh(liveRefresh, !lock.locked && !commands.active && !editingLayout)
+  /*
+   * The pull listens on the window, so anything else that wants a downward drag
+   * has to be excluded by hand or the two fire together.
+   *
+   *   editingLayout — rearranging is a drag that starts at the top of the page
+   *                   as often as not;
+   *   settingsOpen  — the sheet is dragged down to dismiss, and the pull was
+   *                   taking that gesture and hauling the dashboard down behind
+   *                   the backdrop instead.
+   */
+  const pull = usePullToRefresh(
+    liveRefresh,
+    !lock.locked && !commands.active && !editingLayout && !settingsOpen,
+  )
 
   useEffect(() => registerServiceWorker(() => setUpdateReady(true)), [])
 

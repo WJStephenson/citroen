@@ -30,9 +30,10 @@ only — you already have the domain, tunnel, and nginx container.
   legible before a word of it is read: lobed silhouettes for the soft or
   radiating quantities (cabin warmth, moving air, light, sound), a circle where
   the tile's own edge is an instrument (12V), a domed top for anything with a
-  fill line in it (charge, and the limit it fills to), and mirrored diagonal
-  corners for the counted numbers. Tiles holding a slider or a chart stay
-  rectangular — a shaped tile has no corners to put them in.
+  fill line in it (charge, and the limit it fills to), a domed foot for the two
+  tiles about time (the window you schedule, the record of what happened), and
+  mirrored diagonal corners for the counted numbers. Tiles holding a slider or a
+  chart stay rectangular — a shaped tile has no corners to put them in.
 - **Pre-conditioning toggle** — with a non-blocking overlay that counts elapsed
   seconds against the 30–90s cellular wake-up window, so a slow response reads
   as normal rather than broken.
@@ -42,18 +43,28 @@ only — you already have the domain, tunnel, and nginx container.
   so one decision is one command rather than a dozen wake-ups. Hold still
   instead of swiping and the tile is picked up for rearranging.
 - **Charging window** — separate start and stop times, so the car only charges
-  inside your off-peak tariff window. These are two unrelated mechanisms in the
-  bridge and can fail independently, so each has its own Set button. Both can be
-  cleared: *Charge now* cancels a deferred start, *Clear stop* removes the stop
-  time.
+  inside your off-peak tariff hours, drawn as an arc on a 24-hour dial with a
+  marker for the present, so a window crossing midnight reads as a shape rather
+  than as a caveat. These are two unrelated mechanisms in the bridge and can
+  fail independently, so each time has its own confirm mark, which lights only
+  when that field differs from what the car was last told. Both can be cleared:
+  *Charge now* cancels a deferred start, *Clear stop* removes the stop time.
 - **Lights** and **Horn** — one tile each, because they are not the same kind of
   decision: the lights are harmless and fire on the first tap, the horn asks for
   a second one.
 - **Charging history** — energy added per session, charted from
-  `/vehicles/chargings`, with a table view.
+  `/vehicles/chargings`, over a strip of totals, with a table view. Tap a bar
+  for that session's detail: where in the battery it charged (20→80% is not the
+  same event as 60→100%), how long it took, and what it cost.
+- **Electricity tariff** — day and night rates in p/kWh plus the hours the night
+  rate applies, and each session's cost is split across the two by the time it
+  spent in each. The bridge's own flat-rate figure is the fallback. See
+  [Session cost](#session-cost-is-worked-out-in-the-app-not-taken-from-the-bridge).
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
 - **Pull-to-refresh** — the primary way to get live state, because background
-  polling is deliberately throttled (see [Battery safety](#battery-safety)).
+  polling is deliberately throttled (see [Battery safety](#battery-safety)). It
+  stands down while the settings sheet is open or the grid is being rearranged,
+  since those want the same downward drag.
 - **App lock** — WebAuthn biometrics or a local PIN, re-armed when the app has
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
@@ -305,6 +316,33 @@ Two traps in the charging data:
   endpoint returns it. `/vehicles/chargings` gives completed *sessions*, not the
   shape of the charge. Getting the real curve into this app would mean adding a
   route to the bridge.
+
+### Session cost is worked out in the app, not taken from the bridge
+
+`/vehicles/chargings` returns a `price` per session, but PSACC computes it from
+the single flat rate in its own config. That is wrong for any time-of-use
+tariff, and wrong in the direction that matters: it prices a charge that ran
+entirely inside the cheap overnight window at the day rate, which hides exactly
+the saving the charging window was set up to make.
+
+So **Settings → Electricity** takes a day rate, a night rate and the hours the
+night rate applies, all in p/kWh and local wall-clock time. `src/tariff.ts` then
+splits each session's energy across the two rates in proportion to the minutes
+it spent in each (`nightMinutes` handles a window that crosses midnight, and a
+session that runs past more than one night). The bridge's `price` is used only
+when no tariff has been entered.
+
+Two caveats:
+
+- **The split is pro rata by time**, which assumes constant power for the whole
+  session. Charging tapers as the battery fills, so a session that leaves the
+  cheap window in its last hour is charged slightly more day-rate energy here
+  than it really used. Fixing this properly needs the charging curve, which the
+  bridge records but does not expose — see above.
+- **The tariff window is not the charging window.** The tariff says what power
+  costs; the charging window on the dashboard says when the car draws it. They
+  are usually set to overlap, but nothing forces that, and the cost is computed
+  from when the car actually charged.
 
 ### Endpoints available but not surfaced in the UI
 

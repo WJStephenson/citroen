@@ -553,7 +553,11 @@ button {
  *   a domed top           something with a fill line in it (the charge tile and
  *                         the limit it fills to), so the two are visibly the
  *                         same kind of thing;
- *   an even squircle      the long, calm tiles at the foot of the grid.
+ *   a domed foot          time — the window you schedule and the record of what
+ *                         actually happened. They are the two long tiles at the
+ *                         bottom of the grid, and turning the dome the other way
+ *                         up rhymes them with the fill-line pair without ever
+ *                         being mistaken for it.
  */
 .widget-charge-state {
   border-radius: var(--corner-lg) var(--corner-sm) var(--corner-lg) var(--corner-sm);
@@ -566,6 +570,11 @@ button {
 .widget-charge,
 .widget-limit {
   border-radius: var(--corner-lg) var(--corner-lg) var(--corner-sm) var(--corner-sm);
+}
+
+.widget-window,
+.widget-history {
+  border-radius: var(--corner-sm) var(--corner-sm) var(--corner-lg) var(--corner-lg);
 }
 
 /*
@@ -1150,6 +1159,280 @@ button {
   transition: none;
 }
 
+/* ---------- charging window tile ---------- */
+
+/*
+ * A charging window is a span on a clock, so it is drawn on one. The overnight
+ * window every off-peak tariff wants crosses midnight, which a ring shows as an
+ * arc across its top and a left-to-right track has to apologise for with the
+ * word "(overnight)".
+ *
+ * Midnight is at twelve o'clock and the day runs clockwise, so the dial is a
+ * 24-hour clock rather than a progress bar bent into a circle. It is the same
+ * instrument as the 12V tile, one size down.
+ */
+.window-top {
+  display: flex;
+  align-items: center;
+  gap: 1.125rem;
+  margin-top: 0.35rem;
+}
+
+.window-dial {
+  position: relative;
+  flex: 0 0 auto;
+  width: 104px;
+  height: 104px;
+}
+
+.window-dial svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* An SVG viewport clips at its own edge by default, which would cut the glow
+     the open-window arc throws — the filter's result is wider than the geometry
+     that produced it. */
+  overflow: visible;
+}
+
+.window-track,
+.window-arc {
+  fill: none;
+  stroke-width: 8;
+}
+
+.window-track {
+  stroke: var(--track);
+}
+
+.window-arc {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition:
+    stroke-dasharray 500ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    transform 500ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Inside the window right now. The one place the arc is allowed to glow — it is
+   saying "this is happening", the same thing the charge tile's wave says. */
+.widget-window.is-open .window-arc {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 65%, transparent));
+}
+
+.window-tick {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.35;
+}
+
+.window-tick.is-midnight {
+  opacity: 0.85;
+}
+
+/* Now, ringed in the tile's own colour so it stays legible where it crosses the
+   arc — the 2px surface ring every overlapping mark on this dashboard carries. */
+.window-now {
+  fill: var(--text);
+  stroke: var(--surface);
+  stroke-width: 2;
+  transition: transform 400ms ease;
+}
+
+.window-dial-centre {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.window-summary {
+  min-width: 0;
+}
+
+/* A span rather than a measurement, so it wears the state-word size — but with
+   tabular figures, because the two ends of it have to line up as times. */
+.window-time {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 1.3125rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.window-open {
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-fg) 22%, var(--surface));
+  color: var(--accent-fg);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/*
+ * The only part of the tile that is a form, and the only part on a raised
+ * panel — so the reading above it stays a reading rather than becoming the
+ * first field of one.
+ */
+.window-panel {
+  margin-top: 0.875rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.window-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.625rem;
+  padding: 0.5rem 0.625rem;
+  transition: background 200ms ease;
+}
+
+.window-row + .window-row {
+  border-top: 1px solid var(--track);
+}
+
+/* This field no longer matches what the car was last told. The tint is the
+   quiet half of the signal; the confirm button lighting up is the loud half. */
+.window-row.is-dirty {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.window-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* Which end of the arc this row sets: solid for the start, hollow for the
+   stop — the same open/closed pair the phase steps use. */
+.window-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.window-dot.is-stop {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--accent-dim);
+}
+
+/* Sunk into the panel rather than raised off it: within the form, the field is
+   the hole you type into. */
+.time-input.is-chip {
+  flex: 0 1 auto;
+  width: 100%;
+  min-height: 42px;
+  border-color: transparent;
+  background: var(--surface);
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+/*
+ * Send this row. A mark rather than the word "Set", because there are two of
+ * them and the word was doing no work the row's own label did not already do —
+ * and because a mark can be lit.
+ */
+.window-apply {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--track);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    scale 120ms ease;
+}
+
+.window-apply svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.window-apply:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.window-apply.is-ready {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  animation: apply-in 280ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.window-apply:not(:disabled):active {
+  scale: 0.94;
+}
+
+@keyframes apply-in {
+  from {
+    scale: 0.6;
+  }
+}
+
+/*
+ * This row's command is on the wire. Not the .is-busy bar the rest of the app
+ * uses — a 2px bar along the foot of a circle is a two-pixel chord — so the
+ * same idea is drawn as a ring outside the button instead.
+ */
+.window-apply.is-working::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  animation: spin 780ms linear infinite;
+}
+
+.window-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 0.1rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+/* The two overrides that throw the window away, kept off the panel and below
+   it: they are not part of setting it. */
+.window-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.window-actions .button {
+  flex: 1;
+}
+
 /* ---------- rearrange bar ---------- */
 
 .edit-bar {
@@ -1342,6 +1625,38 @@ button {
   flex: 0 0 auto;
 }
 
+/*
+ * A two-way view switch riding on a heading line — the history tile's chart /
+ * table, and nothing else so far. It was a single button that relabelled itself
+ * to the view you were *not* looking at, which is the one control shape that
+ * can always be read backwards. Two pills with one of them lit cannot be.
+ *
+ * Below the 48px the rest of the app keeps to, deliberately: it changes how one
+ * tile is drawn and undoes itself on the next tap, so it is sized like the
+ * heading it sits on rather than like the commands that wake the car.
+ */
+.segmented.is-mini {
+  grid-template-columns: repeat(2, minmax(3.25rem, 1fr));
+  gap: 2px;
+  margin-top: 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  flex: 0 0 auto;
+}
+
+.segmented.is-mini .segment {
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.segmented.is-mini .segment.is-selected {
+  color: var(--on-accent);
+}
+
 .unit-row {
   display: flex;
   align-items: center;
@@ -1353,21 +1668,6 @@ button {
 .unit-row > span {
   font-size: 0.875rem;
   color: var(--muted);
-}
-
-/* Start / Stop rows for the charging window: label, time, button. */
-.window-grid {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.875rem;
-}
-
-.window-label {
-  font-size: 0.8125rem;
-  color: var(--muted);
-  min-width: 2.75rem;
 }
 
 .button {
@@ -1413,6 +1713,28 @@ button {
   min-height: 34px;
   padding: 0 0.7rem;
   font-size: 0.8125rem;
+}
+
+/*
+ * Same size, less voice. For the second action in a pair where both have to
+ * stay thumb-sized but only one is the thing you came for — dropping to
+ * .is-small would say "secondary" by making it harder to hit, which is the
+ * wrong trade on a phone.
+ */
+.button.is-quiet {
+  background: transparent;
+  color: var(--muted);
+}
+
+.button.is-quiet:not(:disabled):active {
+  background: var(--surface-2);
+}
+
+.button svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .time-input {
@@ -1480,6 +1802,25 @@ button {
  */
 :root {
   --series: #30ae77;
+  /* The foot of the bar gradient. One hue, one step down — a sequential ramp of
+     two, not a second series. Darker rather than more transparent, so the bars
+     do not lose contrast against a light surface as they approach the axis. */
+  --series-deep: #26895e;
+}
+
+/*
+ * The light theme needs its own steps down the same hue, for the same reason it
+ * needs --accent-fg: a mark tuned to be legible against near-black is not
+ * legible against white. These are the steps that clear 3:1 on --surface, which
+ * the dark pair does not have to and the dark pair's values do not.
+ */
+:root[data-theme='light'] {
+  --series: #1c8a5c;
+  /* Not simply the dark step made darker: taken down in lightness while the
+     chroma is held up, or the foot of every bar reads as grey rather than as
+     the bottom of a green one. Both steps checked with the palette validator
+     against this theme's surface, not by eye. */
+  --series-deep: #0e7a50;
 }
 
 .chart {
@@ -1490,13 +1831,35 @@ button {
   overflow: visible;
 }
 
+/* Set here rather than as a fill attribute: a CSS rule beats a presentation
+   attribute, so a class that sets fill would win over one written on the mark. */
 .chart-bar {
-  fill: var(--series);
+  fill: url(#history-bar);
   transition: opacity 150ms ease;
 }
 
+/*
+ * Held well up from the 0.4 it used to sit at. Opacity dims toward the surface,
+ * so on the dark theme it darkens a mark that was already dark and on the light
+ * theme it bleaches one toward white — and at 0.4 the unselected bars stopped
+ * being readable data on white at all. The lit band behind the selection does
+ * most of the work of saying which bar is picked; this only has to step the
+ * others back, not erase them.
+ */
 .chart-bar.is-dimmed {
-  opacity: 0.4;
+  opacity: 0.62;
+}
+
+/* The selected session, lit behind the bar rather than by recolouring it — the
+   mark goes on meaning magnitude and nothing else. */
+.chart-slot {
+  fill: var(--accent);
+  opacity: 0.1;
+}
+
+.chart-tick.is-active {
+  fill: var(--text);
+  font-weight: 600;
 }
 
 .chart-hit {
@@ -1525,24 +1888,169 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.chart-readout {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem 0.875rem;
-  margin-top: 0.5rem;
-  font-size: 0.8125rem;
+.chart-hint {
+  font-size: 0.75rem;
   color: var(--muted);
-  min-height: 1.25rem;
 }
 
-.chart-readout strong {
-  color: var(--text);
+/* ---------- charging history tile ---------- */
+
+/*
+ * Three layers, coarse to fine: the totals strip, the plot, then the detail of
+ * the one session you picked. Each is a step further in, and each sits on its
+ * own surface so which layer you are reading is never in doubt.
+ */
+.history-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.375rem;
+  margin-top: 0.75rem;
+}
+
+/*
+ * Three of these share the width of one tile, so the figure inside is sized to
+ * the worst case rather than to the pretty one: a ten-session total runs to
+ * three digits and a unit, and a priced one to four digits and a symbol. At
+ * 1rem both clear a 320px phone; at the 1.0625rem the detail panel uses, the
+ * total alone overflows its own chip.
+ */
+.history-stat {
+  padding: 0.5rem 0.5625rem 0.5625rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.history-stat-value {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.history-stat-value span {
+  margin-left: 0.15em;
+  font-size: 0.6em;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Free to wrap to a second line — the chips stretch to a common height, so the
+   longest label sets the row rather than clipping itself. */
+.history-stat-label {
+  margin: 0.2rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+/*
+ * The readout for the selected bar. A panel rather than a line of text, with a
+ * fixed floor under it: a plot that grew and shrank by a row every time a bar
+ * was tapped would shove the rest of the page around under the thumb doing the
+ * tapping.
+ */
+.history-detail {
+  display: grid;
+  gap: 0.5rem;
+  /* Tall enough for a full session — date, energy, the state-of-charge bar and
+     the meta line — so picking a bar fills the panel instead of growing it. */
+  min-height: 5.25rem;
+  margin-top: 0.625rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.history-detail.is-empty {
+  place-content: center;
+  text-align: center;
+}
+
+.history-detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.history-detail-date {
+  margin: 0;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
-.chart-hint {
+.history-detail-energy {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-detail-energy span {
+  margin-left: 0.15em;
+  font-size: 0.6em;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.history-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.875rem;
   font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* How the two rates carved the session up. Only the cheap half is coloured —
+   it is the one the charging window exists to buy. */
+.history-split {
+  margin: -0.15rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-split .is-night {
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+/*
+ * Where in the battery the charge happened, on the full 0–100 scale — a segment
+ * floating at its own start level rather than a bar growing from the left.
+ * 20→80% and 60→100% are the same energy and very different events, and this is
+ * the only thing on the tile that says which one you are looking at.
+ */
+.history-soc {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.soc-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.soc-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--series-deep), var(--series));
 }
 
 .chart-skeleton {
@@ -1808,6 +2316,14 @@ button {
   border-radius: 22px 22px 0 0;
   padding: 0.75rem 1.15rem calc(env(safe-area-inset-bottom) + 1.25rem);
   animation: slide-up 240ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  /* --sheet-offset is the live drag distance, set on the element. */
+  translate: 0 var(--sheet-offset, 0px);
+  transition: translate 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Nothing to animate towards while the finger is holding it. */
+.sheet.is-dragging {
+  transition: none;
 }
 
 @keyframes slide-up {
@@ -1816,12 +2332,73 @@ button {
   }
 }
 
+/*
+ * The drag handle. Sized as a hairline but padded out to a real target: the bar
+ * is 4px tall and a thumb is not, so the box around it is what the gesture
+ * actually starts from.
+ */
 .sheet-grip {
+  width: 100%;
+  padding: 0.6rem 0;
+  margin-bottom: 0.15rem;
+  cursor: grab;
+  /* The one part of the sheet that must never scroll under the finger — it is
+     the handle whether the content below it is at the top or not. */
+  touch-action: none;
+}
+
+.sheet-grip::before {
+  content: '';
+  display: block;
   width: 38px;
   height: 4px;
   border-radius: 2px;
   background: var(--track);
-  margin: 0 auto 0.75rem;
+  margin: 0 auto;
+}
+
+.sheet.is-dragging .sheet-grip {
+  cursor: grabbing;
+}
+
+/* ---------- tariff rates ---------- */
+
+/* Two fields to a line: day against night, from against until — each pair is
+   read as a comparison, so they belong side by side. */
+.rate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.rate-grid .field.is-rate {
+  margin-bottom: 0.75rem;
+}
+
+/* The unit rides inside the field rather than sitting in the label, so what you
+   are typing and what it is measured in are never separated. */
+.rate-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.rate-input input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 3.4rem 0 0.75rem;
+  border: 1px solid var(--track);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-unit {
+  position: absolute;
+  right: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  pointer-events: none;
 }
 
 .sheet h2 {
@@ -1898,6 +2475,13 @@ button {
    */
   .widget-ring-sweep {
     background: var(--accent);
+  }
+
+  /* Same problem on the confirm button: a stopped spinner is one arc of border
+     sitting at whatever angle it was caught at, which reads as a stray edge. A
+     closed ring reads as "this one". */
+  .window-apply.is-working::after {
+    border-color: var(--accent);
   }
 
   /* Likewise the mark: with the drawing-on collapsed it must not be left in

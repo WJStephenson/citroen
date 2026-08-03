@@ -277,12 +277,26 @@ export function resumeDelayedCharge(): Promise<CommandResult> {
  */
 export function normaliseSession(raw: RawChargingSession): ChargingSession {
   const started = raw.start_at ? new Date(raw.start_at) : null
+  const startedAt = started && !Number.isNaN(started.getTime()) ? started : null
+  const stopped = raw.stop_at ? new Date(raw.stop_at) : null
+  const stoppedAt = stopped && !Number.isNaN(stopped.getTime()) ? stopped : null
+
+  /*
+   * duration_min is what the bridge normally supplies, but it is missing on
+   * rows written by older versions. The two timestamps say the same thing and
+   * are the only ones present on those rows — and the duration is no longer
+   * cosmetic now that a tariff splits a session's energy across rate periods by
+   * how long it spent in each.
+   */
+  const spanned =
+    startedAt && stoppedAt ? Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000) : null
+
   return {
-    startedAt: started && !Number.isNaN(started.getTime()) ? started : null,
+    startedAt,
     energy: num(raw.kw),
     startLevel: num(raw.start_level),
     endLevel: num(raw.end_level),
-    durationMinutes: num(raw.duration_min),
+    durationMinutes: num(raw.duration_min) ?? (spanned !== null && spanned > 0 ? spanned : null),
     mode: raw.charging_mode ?? null,
     price: num(raw.price),
   }

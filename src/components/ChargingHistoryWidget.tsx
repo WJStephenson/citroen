@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchChargingSessions } from '../api/client'
 import { ApiError, type ChargingSession } from '../api/types'
+import { useTariff } from '../hooks/useTariff'
+import { costOf, formatMoney, type Tariff } from '../tariff'
 import { ChartIcon } from './Icons'
 import { Widget, WidgetNote } from './Widget'
 
@@ -9,6 +11,12 @@ import { Widget, WidgetNote } from './Widget'
  *
  * Reads /vehicles/chargings, which is psa_car_controller's own database — it
  * never contacts the car, so it is safe to load on mount.
+ *
+ * Three layers, coarse to fine: the totals strip answers "how much charging is
+ * this car doing" without reading the plot at all; the plot answers "and how is
+ * that distributed"; the panel under it answers "what happened on that one
+ * day", but only once a bar has been picked. Each one is a step further in, and
+ * none of them repeats the one above it.
  *
  * One series, so no legend: the heading says what is plotted. Values are
  * direct-labelled selectively (the largest session, and whichever is selected);
@@ -60,11 +68,21 @@ function duration(minutes: number | null): string {
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
 }
 
+/**
+ * What a session cost: worked out from the tariff when one is configured, and
+ * otherwise whatever the bridge said. The bridge's figure is a single flat rate
+ * applied to everything, so it is the fallback rather than the source of truth.
+ */
+function priceOf(session: ChargingSession, tariff: Tariff): number | null {
+  return costOf(session, tariff)?.total ?? session.price
+}
+
 export function ChargingHistoryWidget() {
   const [sessions, setSessions] = useState<ChargingSession[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [asTable, setAsTable] = useState(false)
+  const tariff = useTariff()
 
   const load = () => {
     setError(null)
@@ -79,7 +97,7 @@ export function ChargingHistoryWidget() {
 
   if (error) {
     return (
-      <Widget icon={<ChartIcon />} label="Charging history">
+      <Widget icon={<ChartIcon />} label="Charging history" className="widget-history">
         <WidgetNote>{error}</WidgetNote>
         <div className="row">
           <button type="button" className="button" onClick={load}>
@@ -92,7 +110,7 @@ export function ChargingHistoryWidget() {
 
   if (sessions === null) {
     return (
-      <Widget icon={<ChartIcon />} label="Charging history">
+      <Widget icon={<ChartIcon />} label="Charging history" className="widget-history">
         <WidgetNote>Loading…</WidgetNote>
         <div className="chart-skeleton" aria-hidden="true" />
       </Widget>
@@ -103,7 +121,7 @@ export function ChargingHistoryWidget() {
   // state on a fresh install rather than an error.
   if (sessions.length === 0) {
     return (
-      <Widget icon={<ChartIcon />} label="Charging history">
+      <Widget icon={<ChartIcon />} label="Charging history" className="widget-history">
         <WidgetNote>No sessions recorded yet. The first one will appear here once it finishes.</WidgetNote>
       </Widget>
     )
@@ -121,21 +139,52 @@ export function ChargingHistoryWidget() {
 
   const active = selected !== null ? recent[selected] : null
   const total = values.reduce((sum, v) => sum + v, 0)
+  // A session nobody could price is not a free charge, so it must not be added
+  // in as a zero — it is left out of the total and the label says so.
+  const costs = recent.map((session) => priceOf(session, tariff))
+  const priced = costs.filter((cost): cost is number => cost !== null)
+  const spend = priced.reduce((sum, cost) => sum + cost, 0)
+  // The two-rate split for the selected session, so the panel can show where
+  // the money went rather than just how much of it.
+  const activeCost = active ? costOf(active, tariff) : null
 
   return (
-    <Widget icon={<ChartIcon />} label="Charging history">
+    <Widget icon={<ChartIcon />} label="Charging history" className="widget-history">
       <div className="widget-aside">
         <WidgetNote>
           Energy added · last {recent.length} session{recent.length === 1 ? '' : 's'}
         </WidgetNote>
-        <button
-          type="button"
-          className="button is-small"
-          onClick={() => setAsTable((value) => !value)}
-          aria-pressed={asTable}
-        >
-          {asTable ? 'Chart' : 'Table'}
-        </button>
+        <div className="segmented is-mini" role="group" aria-label="How to show the history">
+          <button
+            type="button"
+            className={`segment ${asTable ? '' : 'is-selected'}`}
+            onClick={() => setAsTable(false)}
+            aria-pressed={!asTable}
+          >
+            Chart
+          </button>
+          <button
+            type="button"
+            className={`segment ${asTable ? 'is-selected' : ''}`}
+            onClick={() => setAsTable(true)}
+            aria-pressed={asTable}
+          >
+            Table
+          </button>
+        </div>
+      </div>
+
+      {/* The headline figures, sunk into their own panels so they read as a
+          summary of the plot rather than as its first row of labels. */}
+      <div className="history-stats">
+        <Stat value={total < 100 ? total.toFixed(1) : total.toFixed(0)} unit="kWh" label="Total" />
+        <Stat value={(total / recent.length).toFixed(1)} unit="kWh" label="Average" />
+        {/* Currency leads its number, so it is part of the value rather than a
+            trailing unit. */}
+        <Stat
+          value={priced.length === 0 ? '—' : formatMoney(spend)}
+          label={priced.length === recent.length ? 'Spend' : 'Spend (partial)'}
+        />
       </div>
 
       {asTable ? (
@@ -174,6 +223,28 @@ export function ChargingHistoryWidget() {
             role="img"
             aria-label={`Energy added per charging session. ${recent.length} sessions, ${total.toFixed(0)} kWh total, largest ${max} kWh.`}
           >
+            <defs>
+              {/*
+                One hue, fading toward the baseline — a bar is denser where it
+                is anchored and lighter where it ends, which lets the tops read
+                against the surface without the mark shouting. In user space,
+                not per bar: a short bar must not get the whole ramp squeezed
+                into it, or height would stop being the only thing encoding
+                magnitude.
+              */}
+              <linearGradient
+                id="history-bar"
+                gradientUnits="userSpaceOnUse"
+                x1="0"
+                y1={PAD.top}
+                x2="0"
+                y2={BASE_Y}
+              >
+                <stop offset="0" stopColor="var(--series)" />
+                <stop offset="1" stopColor="var(--series-deep)" />
+              </linearGradient>
+            </defs>
+
             {/* Hairline, solid, one step off the surface. */}
             {ticks.map((tick) => (
               <g key={tick}>
@@ -189,6 +260,20 @@ export function ChargingHistoryWidget() {
                 </text>
               </g>
             ))}
+
+            {/* The selection, as a lit band behind the bar rather than as a
+                recolouring of it — the mark keeps meaning magnitude and nothing
+                else, and the band is what says "this one". */}
+            {selected !== null && (
+              <rect
+                className="chart-slot"
+                x={PAD.left + band * selected}
+                y={PAD.top}
+                width={band}
+                height={PLOT_H}
+                rx="6"
+              />
+            )}
 
             {recent.map((session, index) => {
               const value = session.energy ?? 0
@@ -242,7 +327,7 @@ export function ChargingHistoryWidget() {
                   key={session.startedAt?.getTime() ?? index}
                   x={PAD.left + band * index + band / 2}
                   y={BASE_Y + 13}
-                  className="chart-tick"
+                  className={`chart-tick ${selected === index ? 'is-active' : ''}`}
                   textAnchor="middle"
                 >
                   {shortDate(session.startedAt)}
@@ -251,27 +336,81 @@ export function ChargingHistoryWidget() {
             })}
           </svg>
 
-          <div className="chart-readout">
+          <div className={`history-detail ${active ? '' : 'is-empty'}`}>
             {active ? (
               <>
-                <strong>{shortDate(active.startedAt)}</strong>
-                <span>
-                  {active.startLevel !== null && active.endLevel !== null
-                    ? `${active.startLevel}→${active.endLevel}%`
-                    : '—'}
-                </span>
-                <span>{duration(active.durationMinutes)}</span>
-                {active.mode && <span>{active.mode}</span>}
-                {active.price !== null && <span>£{active.price.toFixed(2)}</span>}
+                <div className="history-detail-head">
+                  <p className="history-detail-date">{shortDate(active.startedAt)}</p>
+                  <p className="history-detail-energy">
+                    {active.energy === null ? '—' : active.energy.toFixed(1)}
+                    <span>kWh</span>
+                  </p>
+                </div>
+
+                {/* Where in the battery this charge happened, not just how big
+                    it was — 20→80% and 60→100% are the same kWh and very
+                    different events. */}
+                {active.startLevel !== null && active.endLevel !== null && (
+                  <div className="history-soc">
+                    <span>{active.startLevel}%</span>
+                    <div
+                      className="soc-bar"
+                      role="img"
+                      aria-label={`Charged from ${active.startLevel} to ${active.endLevel} percent`}
+                    >
+                      <div
+                        className="soc-bar-fill"
+                        style={{
+                          left: `${active.startLevel}%`,
+                          width: `${Math.max(2, active.endLevel - active.startLevel)}%`,
+                        }}
+                      />
+                    </div>
+                    <span>{active.endLevel}%</span>
+                  </div>
+                )}
+
+                <div className="history-detail-meta">
+                  <span>{duration(active.durationMinutes)}</span>
+                  {active.mode && <span>{active.mode}</span>}
+                  {priceOf(active, tariff) !== null && (
+                    <span>{formatMoney(priceOf(active, tariff) as number)}</span>
+                  )}
+                </div>
+
+                {/*
+                  Where the money went, but only when the session actually
+                  straddled the two rates — on a charge that sat entirely inside
+                  the cheap window this would just be the energy figure written
+                  out a second time.
+                */}
+                {activeCost && activeCost.nightKwh >= 0.05 && activeCost.dayKwh >= 0.05 && (
+                  <p className="history-split">
+                    <span className="is-night">{activeCost.nightKwh.toFixed(1)} kWh</span> at{' '}
+                    {tariff.nightRate.toFixed(2)}p · {activeCost.dayKwh.toFixed(1)} kWh at{' '}
+                    {tariff.dayRate.toFixed(2)}p
+                  </p>
+                )}
               </>
             ) : (
-              <span className="chart-hint">
-                {total.toFixed(0)} kWh total · tap a bar for detail
-              </span>
+              <span className="chart-hint">Tap a bar for the detail of that session</span>
             )}
           </div>
         </>
       )}
     </Widget>
+  )
+}
+
+/** One headline figure from the plotted window. */
+function Stat({ value, unit, label }: { value: string; unit?: string; label: string }) {
+  return (
+    <div className="history-stat">
+      <p className="history-stat-value">
+        {value}
+        {unit && <span>{unit}</span>}
+      </p>
+      <p className="history-stat-label">{label}</p>
+    </div>
   )
 }

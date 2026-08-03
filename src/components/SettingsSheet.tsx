@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { MIN_POLL_MINUTES, getPollMinutes, getVin, setPollMinutes, setVin } from '../config'
+import { useSheetDismiss } from '../hooks/useSheetDismiss'
+import { useTariff } from '../hooks/useTariff'
 import { useTheme } from '../hooks/useTheme'
 import { useUnits } from '../hooks/useUnits'
+import { setTariff } from '../tariff'
 import { setTheme } from '../theme'
 import { setUnits } from '../units'
 import {
@@ -23,10 +26,13 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
-  // Units and theme are applied immediately rather than on Save — the change
-  // is visible behind the sheet, so waiting for a reload would feel broken.
+  // Units, theme and the tariff are applied immediately rather than on Save —
+  // the change is visible behind the sheet, so waiting for a reload would feel
+  // broken. Only the VIN and the poll interval need the reload Save does.
   const units = useUnits()
   const theme = useTheme()
+  const tariff = useTariff()
+  const sheet = useSheetDismiss(onClose)
 
   const save = () => {
     setVin(vin)
@@ -74,13 +80,18 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   return (
     <div className="sheet-backdrop" onClick={onClose} role="presentation">
       <div
-        className="sheet"
+        ref={sheet.sheetRef}
+        className={`sheet ${sheet.dragging ? 'is-dragging' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
+        style={{ '--sheet-offset': `${sheet.offset}px` } as CSSProperties}
         onClick={(event) => event.stopPropagation()}
+        {...sheet.handlers}
       >
-        <div className="sheet-grip" aria-hidden="true" />
+        {/* A real handle now — see useSheetDismiss. It used to only look like
+            one, and the drag it invited fell through to pull-to-refresh. */}
+        <div className="sheet-grip" role="presentation" />
         <h2>Settings</h2>
 
         <label className="field">
@@ -109,6 +120,90 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
           Polling below {MIN_POLL_MINUTES} minutes keeps the car's ECUs awake and flattens the 12V
           battery. Pull down on the dashboard whenever you want live state.
         </p>
+
+        <h3>Electricity</h3>
+        <p className="note">
+          The bridge prices every charge at one flat rate, which hides the whole point of
+          charging overnight. Enter your tariff and the app works the cost out itself, splitting
+          each session across the two rates by the time it spent in each.
+        </p>
+        <div className="unit-row">
+          <span>Use my tariff</span>
+          <button
+            type="button"
+            className={`switch ${tariff.enabled ? 'is-on' : ''}`}
+            role="switch"
+            aria-checked={tariff.enabled}
+            aria-label="Work costs out from my tariff"
+            onClick={() => setTariff({ enabled: !tariff.enabled })}
+          >
+            <span className="switch-thumb" />
+          </button>
+        </div>
+
+        {tariff.enabled && (
+          <>
+            <div className="rate-grid">
+              <label className="field is-rate">
+                <span>Day rate</span>
+                <div className="rate-input">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step={0.01}
+                    value={tariff.dayRate || ''}
+                    placeholder="28.62"
+                    onChange={(event) => setTariff({ dayRate: Number(event.target.value) })}
+                  />
+                  <span className="rate-unit">p/kWh</span>
+                </div>
+              </label>
+              <label className="field is-rate">
+                <span>Night rate</span>
+                <div className="rate-input">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step={0.01}
+                    value={tariff.nightRate || ''}
+                    placeholder="7.50"
+                    onChange={(event) => setTariff({ nightRate: Number(event.target.value) })}
+                  />
+                  <span className="rate-unit">p/kWh</span>
+                </div>
+              </label>
+            </div>
+
+            <div className="rate-grid">
+              <label className="field is-rate">
+                <span>Night rate from</span>
+                <input
+                  type="time"
+                  className="time-input"
+                  value={tariff.nightStart}
+                  onChange={(event) => setTariff({ nightStart: event.target.value })}
+                />
+              </label>
+              <label className="field is-rate">
+                <span>until</span>
+                <input
+                  type="time"
+                  className="time-input"
+                  value={tariff.nightEnd}
+                  onChange={(event) => setTariff({ nightEnd: event.target.value })}
+                />
+              </label>
+            </div>
+            <p className="note">
+              A window that crosses midnight is normal — 00:30 until 07:30 is Economy 7. This is
+              your <em>tariff's</em> cheap hours, which is not the same thing as the charging
+              window you set on the dashboard: the tariff says what power costs, the window says
+              when the car takes it.
+            </p>
+          </>
+        )}
 
         <h3>Appearance</h3>
         <div className="unit-row">

@@ -22,6 +22,7 @@ import {
   type PreconditioningStatus,
   type RawChargingSession,
   type RawVehicleInfo,
+  type VehicleLocation,
   type VehicleState,
 } from './types'
 
@@ -153,6 +154,20 @@ function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/**
+ * GeoJSON orders coordinates [lon, lat, altitude?] — easy to transpose by
+ * accident, so this is the one place that reads them.
+ */
+function parseLocation(raw: RawVehicleInfo): VehicleLocation | null {
+  const coordinates = raw.last_position?.geometry?.coordinates
+  if (!coordinates || coordinates.length < 2) return null
+  const [lon, lat] = coordinates
+  if (typeof lon !== 'number' || typeof lat !== 'number') return null
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null
+  if (lon === 0 && lat === 0) return null // the bridge's "no fix yet" sentinel
+  return { lat, lon, heading: num(raw.last_position?.properties?.heading) }
+}
+
 export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
   // A car with both an EV and a fuel tank reports several energy entries.
   const energy = raw.energy?.find((e) => e.type?.toLowerCase() === 'electric') ?? raw.energy?.[0]
@@ -172,6 +187,7 @@ export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
     cabinTemp: num(raw.environment?.air?.temp),
     odometer: num(raw.timed_odometer?.mileage),
     auxVoltage: num(raw.battery?.voltage),
+    location: parseLocation(raw),
     reportedAt: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
   }
 }

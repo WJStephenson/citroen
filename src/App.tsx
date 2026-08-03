@@ -7,6 +7,7 @@ import { CarHero } from './components/CarHero'
 import { CommandOverlay } from './components/CommandOverlay'
 import { HornWidget, LightsWidget } from './components/FindCarWidgets'
 import { LayoutIcon, RefreshIcon, SettingsIcon } from './components/Icons'
+import { LocationWidget } from './components/LocationWidget'
 import { PreconditionWidget } from './components/PreconditionWidget'
 import { SettingsSheet } from './components/SettingsSheet'
 import {
@@ -112,6 +113,12 @@ export default function App() {
         },
         { id: 'cabin', label: 'Cabin temperature', node: <CabinWidget celsius={state.cabinTemp} /> },
         { id: 'odometer', label: 'Odometer', node: <OdometerWidget km={state.odometer} /> },
+        {
+          id: 'location',
+          label: 'Location',
+          span: 2,
+          node: <LocationWidget location={state.location} />,
+        },
         { id: 'lights', label: 'Lights', node: <LightsWidget commands={commands} /> },
         { id: 'horn', label: 'Horn', node: <HornWidget commands={commands} /> },
         {

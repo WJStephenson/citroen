@@ -192,6 +192,16 @@ export function ClockIcon() {
   )
 }
 
+/** A pin dropped on a map. */
+export function PinIcon() {
+  return (
+    <svg {...light}>
+      <path d="M12 21.5c4-4.2 7-8 7-11.5a7 7 0 1 0-14 0c0 3.5 3 7.3 7 11.5Z" />
+      <circle cx="12" cy="10" r="2.4" />
+    </svg>
+  )
+}
+
 export function ChartIcon() {
   return (
     <svg {...light}>

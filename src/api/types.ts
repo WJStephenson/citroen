@@ -37,7 +37,7 @@ export interface RawVehicleInfo {
   environment?: { air?: { temp?: number } }
   last_position?: {
     geometry?: { coordinates?: number[] }
-    properties?: { updated_at?: string }
+    properties?: { updated_at?: string; heading?: number }
   }
   service_type?: string
 }
@@ -70,8 +70,17 @@ export interface VehicleState {
   odometer: number | null
   /** 12V auxiliary battery voltage — the drain risk called out in §5. */
   auxVoltage: number | null
+  /** Where the car last reported being parked or driving. */
+  location: VehicleLocation | null
   /** When the *car* last reported, not when we last polled. */
   reportedAt: Date | null
+}
+
+export interface VehicleLocation {
+  lat: number
+  lon: number
+  /** Compass heading in degrees, when the car reports one. */
+  heading: number | null
 }
 
 /** One completed charging session, as Charging.get_chargings() returns it. */

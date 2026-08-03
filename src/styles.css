@@ -2066,6 +2066,42 @@ button {
   overflow-x: auto;
 }
 
+/* ---------- location ---------- */
+
+.map-frame {
+  overflow: hidden;
+  height: 160px;
+  margin-bottom: 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.map-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/*
+ * OpenStreetMap's tiles are drawn for a light page and have no dark variant.
+ * Inverting the lightness channel and spinning the hue back gives a passable
+ * dark basemap without a second tile source — the same trick most dashboards
+ * use for embedded light-only maps. The light theme already matches the
+ * tiles, so it gets none of this.
+ */
+:root:not([data-theme='light']) .map-frame iframe {
+  filter: invert(92%) hue-rotate(180deg) brightness(0.95) contrast(0.92);
+}
+
+.widget-location .widget-aside {
+  align-items: flex-start;
+}
+
+.widget-location .widget-aside .widget-note {
+  flex: 1;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

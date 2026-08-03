@@ -1680,6 +1680,12 @@ button {
   border: 1px solid var(--track);
   border-radius: var(--radius-control);
   background: var(--surface-2);
+  /* Only <button>s get the global reset at the top of this file — this class
+     goes on the "Open in Maps" link too, which otherwise keeps the UA
+     stylesheet's blue, underlined anchor styling regardless of everything
+     else here. */
+  color: var(--text);
+  text-decoration: none;
   font-size: 0.9375rem;
   font-weight: 500;
   cursor: pointer;
@@ -2069,6 +2075,7 @@ button {
 /* ---------- location ---------- */
 
 .map-frame {
+  position: relative;
   overflow: hidden;
   height: 160px;
   margin-bottom: 0.75rem;
@@ -2076,22 +2083,47 @@ button {
   background: var(--surface-2);
 }
 
-.map-frame iframe {
+/* Positioned in real px by MapTiles, not with CSS — see tilesFor(). */
+.map-tile {
+  position: absolute;
   display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
+  user-select: none;
 }
 
 /*
  * OpenStreetMap's tiles are drawn for a light page and have no dark variant.
  * Inverting the lightness channel and spinning the hue back gives a passable
  * dark basemap without a second tile source — the same trick most dashboards
- * use for embedded light-only maps. The light theme already matches the
- * tiles, so it gets none of this.
+ * use for light-only raster tiles. The light theme already matches the tiles,
+ * so it gets none of this.
  */
-:root:not([data-theme='light']) .map-frame iframe {
+:root:not([data-theme='light']) .map-tile {
   filter: invert(92%) hue-rotate(180deg) brightness(0.95) contrast(0.92);
+}
+
+/* The tile grid is always built to cover the frame exactly, so the marker is
+   always dead centre — no per-location offset to compute. */
+.map-pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -89%); /* the pin's own tip, not its centre */
+  color: var(--accent);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.5));
+}
+
+.map-pin svg {
+  width: 26px;
+  height: 26px;
+}
+
+.map-pin svg path {
+  fill: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+.map-pin svg circle {
+  fill: var(--accent);
+  stroke: none;
 }
 
 .widget-location .widget-aside {

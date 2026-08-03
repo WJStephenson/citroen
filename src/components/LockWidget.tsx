@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { setDoorLock } from '../api/client'
 import type { Commands } from '../hooks/useCommands'
 import { LockIcon, UnlockIcon } from './Icons'
-import { Widget, WidgetNote } from './Widget'
+import { Widget } from './Widget'
 
 /**
  * Remote lock and unlock, both behind the same tap-twice confirm the horn
@@ -69,8 +69,6 @@ export function LockWidget({ commands }: { commands: Commands }) {
     send(false)
   }
 
-  const armed = lockArmed || unlockArmed
-
   return (
     <Widget
       icon={<LockIcon />}
@@ -79,10 +77,6 @@ export function LockWidget({ commands }: { commands: Commands }) {
       working={busy}
       outcome={commands.outcomeFor('lock')}
     >
-      <WidgetNote tone={armed ? 'warn' : undefined}>
-        {lockArmed ? 'This will lock the doors' : unlockArmed ? 'This will unlock the doors' : 'Asks twice'}
-      </WidgetNote>
-
       <div className="lock-actions">
         <button
           type="button"

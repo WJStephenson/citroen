@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { SHARED_SETTINGS_CHANGED } from './api/sharedSettings'
 import { ChargeLimitWidget } from './components/ChargeLimitWidget'
 import { ChargeWindowWidget } from './components/ChargeWindowWidget'
 import { ChargingHistoryWidget } from './components/ChargingHistoryWidget'
@@ -72,7 +73,15 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const vinMissing = useMemo(() => !getVin(), [settingsOpen])
+  // Live rather than recomputed on a dependency, because the VIN can arrive
+  // asynchronously from the settings store on a device's very first load —
+  // see api/sharedSettings.ts.
+  const [vinMissing, setVinMissing] = useState(() => !getVin())
+  useEffect(() => {
+    const onChange = () => setVinMissing(!getVin())
+    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
+    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
+  }, [])
 
   if (lock.locked) return <LockScreen method={lock.method} onUnlock={lock.unlock} />
 

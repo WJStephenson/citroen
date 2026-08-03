@@ -14,3 +14,8 @@ dist-ssr/
 
 __pycache__/
 *.pyc
+
+# Local settings-store data for `npm run settings-store` (dev only), and the
+# volume docker-compose.settings.yml mounts if run from inside this repo.
+settings-data/
+deploy/settings_data/

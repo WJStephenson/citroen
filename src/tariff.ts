@@ -10,7 +10,13 @@
  *
  * So cost is computed here instead, from the session's own clock span, and the
  * bridge's figure is used only when no tariff has been entered.
+ *
+ * There is one electricity contract for the car, not one per phone, so the
+ * tariff itself is shared across every device (see api/sharedSettings.ts)
+ * rather than stored per-browser.
  */
+
+import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from './api/sharedSettings'
 
 export interface Tariff {
   /** Off until rates are entered — an unconfigured tariff must not silently
@@ -25,11 +31,11 @@ export interface Tariff {
   nightEnd: string
 }
 
-const LS_TARIFF = 'ec4.tariff'
 const DAY = 1440
 
-/** Fired on change so open views re-render without a reload. */
-export const TARIFF_CHANGED = 'ec4:tariff-changed'
+/** Fired on change so open views re-render without a reload — including a
+    change that just arrived from another device. */
+export const TARIFF_CHANGED = SHARED_SETTINGS_CHANGED
 
 /*
  * Economy 7 as it is most commonly metered, which is also what the charging
@@ -46,9 +52,10 @@ const DEFAULTS: Tariff = {
 }
 
 // Same contract as getUnits: a useSyncExternalStore snapshot must return the
-// *same* object until the value genuinely changes, and the raw string is the
-// cache key so a write from another tab invalidates it too.
-let cachedRaw: string | null | undefined
+// *same* object until the value genuinely changes, so the raw (already
+// parsed) field is the cache key — a fetch that lands the same tariff another
+// device already had must not force every subscriber to re-render.
+let cachedRaw: unknown
 let cache: Tariff = DEFAULTS
 
 const isTime = (value: unknown): value is string =>
@@ -57,23 +64,19 @@ const isTime = (value: unknown): value is string =>
 const rate = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
 
-function parse(raw: string | null): Tariff {
-  try {
-    const stored = JSON.parse(raw ?? '{}') as Partial<Tariff>
-    return {
-      enabled: stored.enabled === true,
-      dayRate: rate(stored.dayRate),
-      nightRate: rate(stored.nightRate),
-      nightStart: isTime(stored.nightStart) ? stored.nightStart : DEFAULTS.nightStart,
-      nightEnd: isTime(stored.nightEnd) ? stored.nightEnd : DEFAULTS.nightEnd,
-    }
-  } catch {
-    return { ...DEFAULTS }
+function parse(raw: unknown): Tariff {
+  const stored = (raw && typeof raw === 'object' ? raw : {}) as Partial<Tariff>
+  return {
+    enabled: stored.enabled === true,
+    dayRate: rate(stored.dayRate),
+    nightRate: rate(stored.nightRate),
+    nightStart: isTime(stored.nightStart) ? stored.nightStart : DEFAULTS.nightStart,
+    nightEnd: isTime(stored.nightEnd) ? stored.nightEnd : DEFAULTS.nightEnd,
   }
 }
 
 export function getTariff(): Tariff {
-  const raw = localStorage.getItem(LS_TARIFF)
+  const raw = getSharedSettings().tariff
   if (raw !== cachedRaw) {
     cachedRaw = raw
     cache = parse(raw)
@@ -83,9 +86,8 @@ export function getTariff(): Tariff {
 
 export function setTariff(next: Partial<Tariff>): Tariff {
   const merged = { ...getTariff(), ...next }
-  localStorage.setItem(LS_TARIFF, JSON.stringify(merged))
-  window.dispatchEvent(new Event(TARIFF_CHANGED))
-  return getTariff()
+  patchSharedSettings({ tariff: merged })
+  return merged
 }
 
 /** Minutes past midnight, or null if the string is not a time. */

@@ -3,11 +3,12 @@
  *
  * Build-time env vars provide the defaults; the VIN and poll interval can also
  * be overridden at runtime from the Settings sheet so a rebuild is not needed
- * to point the app at a different car.
+ * to point the app at a different car. Both are shared across every device
+ * controlling this car (see api/sharedSettings.ts) rather than being stored
+ * per-browser — there is one car and one poll policy for it, not one per phone.
  */
 
-const LS_VIN = 'ec4.vin'
-const LS_POLL = 'ec4.pollMinutes'
+import { getSharedSettings, patchSharedSettings } from './api/sharedSettings'
 
 /** nginx strips this prefix before proxying to psa_car_controller:5000. */
 export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -33,21 +34,20 @@ export const EXPECTED_WAKE_SECONDS = 90
 export const LOCK_GRACE_MS = 60_000
 
 export function getVin(): string {
-  return localStorage.getItem(LS_VIN) ?? import.meta.env.VITE_VIN ?? ''
+  const raw = getSharedSettings().vin
+  return typeof raw === 'string' && raw ? raw : (import.meta.env.VITE_VIN ?? '')
 }
 
 export function setVin(vin: string): void {
-  const trimmed = vin.trim().toUpperCase()
-  if (trimmed) localStorage.setItem(LS_VIN, trimmed)
-  else localStorage.removeItem(LS_VIN)
+  patchSharedSettings({ vin: vin.trim().toUpperCase() })
 }
 
 export function getPollMinutes(): number {
-  const stored = Number(localStorage.getItem(LS_POLL))
-  const value = Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_POLL_MINUTES
+  const raw = getSharedSettings().pollMinutes
+  const value = typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_POLL_MINUTES
   return Math.max(MIN_POLL_MINUTES, value)
 }
 
 export function setPollMinutes(minutes: number): void {
-  localStorage.setItem(LS_POLL, String(Math.max(MIN_POLL_MINUTES, Math.round(minutes))))
+  patchSharedSettings({ pollMinutes: Math.max(MIN_POLL_MINUTES, Math.round(minutes)) })
 }

@@ -9,8 +9,9 @@ only — you already have the domain, tunnel, and nginx container.
 | | |
 |---|---|
 | Stack | Vite + React 19 + TypeScript, no UI framework |
-| Output | Static `dist/` — HTML, CSS, JS, icons. No server-side runtime |
+| Output | Static `dist/` — HTML, CSS, JS, icons |
 | Talks to | `psa_car_controller` via `/api/*`, proxied by your nginx |
+| Shared state | A tiny stdlib-Python sidecar via `/settings/`, so household settings agree across phones — see [Shared settings](#shared-settings-across-devices) |
 
 ---
 
@@ -18,7 +19,8 @@ only — you already have the domain, tunnel, and nginx container.
 
 - **Reorderable tile grid** — one scrolling dashboard rather than tabs. Long-press
   any tile (or tap the rearrange button in the app bar) to pick it up and drag it
-  somewhere else; the order is kept in `localStorage` under `ec4.widgetOrder`.
+  somewhere else; the order is shared across every device controlling this car
+  (see [Shared settings](#shared-settings-across-devices)), not stored per-browser.
   Arrow keys move the focused tile when a keyboard is attached.
 - **Charge** — the lead tile fills from the bottom to the state of charge behind a
   wave, and cuts the reading in half at the waterline. Colour carries severity
@@ -60,7 +62,11 @@ only — you already have the domain, tunnel, and nginx container.
   rate applies, and each session's cost is split across the two by the time it
   spent in each. The bridge's own flat-rate figure is the fallback. See
   [Session cost](#session-cost-is-worked-out-in-the-app-not-taken-from-the-bridge).
+  There is one electricity contract for the car, so the tariff is shared across
+  devices too.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
+  Kept per-device, deliberately — see
+  [Shared settings](#shared-settings-across-devices).
 - **Pull-to-refresh** — the primary way to get live state, because background
   polling is deliberately throttled (see [Battery safety](#battery-safety)). It
   stands down while the settings sheet is open or the grid is being rearranged,
@@ -78,8 +84,9 @@ Needs Node 20+ (developed on 24.18.1) and Python 3 for the mock.
 
 ```bash
 npm install
-npm run mock      # terminal 1 — python, stdlib only, no deps
-npm run dev       # terminal 2 — http://localhost:5173
+npm run mock             # terminal 1 — mock bridge, python stdlib only
+npm run settings-store   # terminal 2 — shared settings store, same style
+npm run dev              # terminal 3 — http://localhost:5173
 ```
 
 `.env.local` is already set up to point the dev server at the mock and to
@@ -118,8 +125,20 @@ npm run build     # -> dist/
 ```
 
 `dist/` is fully static. `VITE_VIN` can be baked in at build time, but setting
-the VIN in the app's Settings sheet is easier — it is stored per-device and
-needs no rebuild.
+the VIN in the app's Settings sheet is easier — it is picked up by every
+device from the shared settings store (below) and needs no rebuild.
+
+### 1b. Start the shared settings store
+
+```bash
+docker compose -f deploy/docker-compose.settings.yml up -d
+```
+
+This is what lets every phone controlling the car see the same VIN, tariff,
+dashboard layout and charge hints, instead of each browser keeping its own —
+see [Shared settings](#shared-settings-across-devices). It needs
+`deploy/settings_store.py` copied alongside the compose file on the server,
+same as `nginx-citroen.conf` needs to sit next to `DEPLOYMENT.md`.
 
 ### 2. Copy `dist/` into your nginx container
 
@@ -215,8 +234,9 @@ The doc's §5 constraint drives real behaviour in the code, not just a comment:
 ```
 src/
 ├── api/
-│   ├── client.ts      every psa_car_controller URL, in one place
-│   └── types.ts       Raw* (what the bridge sends) vs VehicleState (what the UI renders)
+│   ├── client.ts          every psa_car_controller URL, in one place
+│   ├── types.ts           Raw* (what the bridge sends) vs VehicleState (what the UI renders)
+│   └── sharedSettings.ts  syncs VIN/tariff/layout/charge-hints with the settings store
 ├── hooks/
 │   ├── useVehicle.ts  telemetry, polling policy, visibility handling
 │   ├── useCommands.ts optimistic updates + the 30-90s latency window
@@ -371,12 +391,47 @@ one — it is not currently surfaced in the UI.
 ### Things the bridge does not report back
 
 `get_vehicleinfo` returns no charge threshold and no charge schedule, so the app
-remembers the last value *it* set and shows it as a hint (`Last set to 80%`).
-If you change either from the car or the official app, this display will be
-stale. It is labelled as a hint rather than presented as live state.
+remembers the last value *any device* set and shows it as a hint (`Last set to
+80%`). That hint is shared across devices the same way the tariff and layout
+are — see [Shared settings](#shared-settings-across-devices) — since it
+describes the car, not whichever phone last touched it. If you change either
+from the car or the official app, this display will be stale either way. It is
+labelled as a hint rather than presented as live state.
 
 (`/charge_control` does echo back its own config as JSON, so the threshold could
 be read live if you want it — the schedule from `/charge_hour` cannot.)
+
+---
+
+## Shared settings across devices
+
+Everyone in the household controls the same one car, so the settings that
+describe *the car* — VIN, background poll interval, electricity tariff,
+dashboard layout, and the "last set" charge start/stop/limit hints — are
+shared across every phone, not stored per-browser. Settings that describe the
+*viewer* instead — theme, distance/temperature units, the app lock's PIN or
+biometric enrolment — stay in that browser's own `localStorage`, since there is
+no single correct answer for those across a household (and a shared PIN would
+defeat the point of a *local* presence check).
+
+This is the one place the PWA is no longer purely static: a small sidecar,
+`deploy/settings_store.py`, holds the shared settings as one JSON file and is
+reached at `/settings/` the same way `psa_car_controller` is reached at
+`/api/` — see `deploy/docker-compose.settings.yml` and the matching nginx
+location. It has no schema of its own; each client module
+(`config.ts`, `tariff.ts`, `useWidgetOrder.ts`, the charge widgets) validates
+the slice it reads defensively, the same stance `api/client.ts` already takes
+with the bridge's own payloads, so a stale or malformed field never crashes the
+app — it just falls back to that field's default.
+
+`src/api/sharedSettings.ts` fetches the blob once at boot and again whenever
+the app is foregrounded, mirrors it to `localStorage` so the app still opens
+instantly offline (the same cache-first stance the service worker takes with
+the shell), and applies local edits optimistically before sending them to the
+store in the background. It is last-write-wins: good enough for a few people
+sharing one car, not built for simultaneous editors. A device that is briefly
+offline keeps its own change; the next successful read or write from any
+device reconciles it.
 
 ---
 

@@ -1,20 +1,22 @@
 # Deploying to your domain
 
 You already have a domain, a Cloudflare Tunnel, and nginx in Docker. This adds
-two things behind that nginx: the `psa_car_controller` bridge, and the built PWA
-as static files.
+three things behind that nginx: the `psa_car_controller` bridge, the shared
+settings store, and the built PWA as static files.
 
 ```
-phone ──HTTPS──▶ Cloudflare edge ──tunnel──▶ cloudflared ──▶ nginx ──┬─▶ /        dist/  (static PWA)
-                       │                                              └─▶ /api/*  psa_car_controller:5000
-                  Access policy                                                        │
-                (this is your only                                                     └──▶ Stellantis
-                 real access control)                                                       (direct, no VPN)
+phone ──HTTPS──▶ Cloudflare edge ──tunnel──▶ cloudflared ──▶ nginx ──┬─▶ /           dist/  (static PWA)
+                       │                                              ├─▶ /api/*     psa_car_controller:5000
+                  Access policy                                      │                   │
+                (this is your only                                   │                   └──▶ Stellantis
+                 real access control)                                │                        (direct, no VPN)
+                                                                      └─▶ /settings/  settings_store:8090
 ```
 
-The whole thing hinges on one fact: **nginx and psa_car_controller must be on
-the same Docker network**, so that `proxy_pass http://psa_car_controller:5000/`
-resolves by container name.
+The whole thing hinges on one fact: **nginx, psa_car_controller and
+settings_store must all be on the same Docker network**, so that
+`proxy_pass http://psa_car_controller:5000/` and
+`proxy_pass http://settings_store:8090/` resolve by container name.
 
 ---
 
@@ -54,6 +56,29 @@ docker exec <nginx-container> wget -qO- http://psa_car_controller:5000/get_vehic
 
 If that resolves, the networking is right. If it fails with a DNS error, the two
 containers are not on the same network.
+
+## 2b. Start the shared settings store
+
+This is what lets every phone controlling the car see the same VIN, tariff,
+dashboard layout and charge hints, instead of each browser keeping its own —
+see the README's [Shared settings across devices](../README.md#shared-settings-across-devices).
+
+Copy `docker-compose.settings.yml` **and** `settings_store.py` to your server
+(the compose file bind-mounts the script — there's no image to build), set the
+`name:` under `networks:` to the same network as step 1, then:
+
+```bash
+docker compose -f docker-compose.settings.yml up -d
+docker logs -f settings_store
+```
+
+Check nginx can see it the same way as the bridge:
+
+```bash
+docker exec <nginx-container> wget -qO- http://settings_store:8090/
+```
+
+An empty `{}` is a healthy answer — it just means nothing has been saved yet.
 
 ## 3. Do the first-time setup on the LAN, before exposing anything
 
@@ -170,8 +195,10 @@ the container, so port 5000 isn't reachable even from the LAN.
 Open the hostname in Chrome on Android → menu → **Install app**. It launches
 standalone, no browser chrome.
 
-In the app: **⚙ → set your VIN → Save**. Optionally set units and turn on the
-app lock.
+In the app: **⚙ → set your VIN → Save**. That VIN, and the tariff and layout
+you set up from here, apply to every phone that opens the app — see the
+README's [Shared settings across devices](../README.md#shared-settings-across-devices).
+Units and the app lock are per-device, so set those separately on each phone.
 
 ---
 
@@ -183,6 +210,7 @@ app lock.
 | App loads, every value is `—`, "Cannot reach the bridge" | `/api/` proxy wrong, or the bridge is down. Test `curl https://host/api/get_vehicleinfo/<VIN>` |
 | "Session expired. Reload to sign in again." | Cloudflare Access returned its login HTML. Re-authenticate, and raise the session duration |
 | "No VIN configured" | Set it in ⚙ |
+| VIN/tariff/layout differ between phones, or a phone reverts to defaults after being offline | `settings_store` unreachable or not started (step 2b). Test `curl https://host/settings/` — an empty `{}` means it's up but nothing's been saved from that request yet |
 | Charge limit / stop time error `VIN not in list` | Charge control not set up in the bridge (step 3) |
 | Charging history empty | Recording not enabled, or no completed sessions yet (step 3) |
 | Commands time out after ~2 min | Normal if the car is in deep sleep and unreachable; otherwise check the bridge logs |

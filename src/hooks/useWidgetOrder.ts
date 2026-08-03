@@ -1,19 +1,18 @@
-import { useCallback, useMemo, useState } from 'react'
-
-const LS_ORDER = 'ec4.widgetOrder'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from '../api/sharedSettings'
 
 function read(): string[] {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(LS_ORDER) ?? '[]')
-    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
-  } catch {
-    return []
-  }
+  const raw = getSharedSettings().widgetOrder
+  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
 }
 
+const sameOrder = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i])
+
 /**
- * The user's widget order, reconciled against whichever widgets actually exist
- * right now.
+ * The dashboard layout, reconciled against whichever widgets actually exist
+ * right now. It is shared across every device controlling this car (see
+ * api/sharedSettings.ts): there is one dashboard for the household to agree
+ * on, not one per phone.
  *
  * Which widgets exist is not fixed: the 12V tile only appears when the reading
  * is plausible, so a stored order is always a partial, possibly stale list. Two
@@ -27,6 +26,18 @@ function read(): string[] {
  */
 export function useWidgetOrder(ids: string[]) {
   const [stored, setStored] = useState<string[]>(read)
+
+  // Another device's reorder lands here without a reload. Guarded by value so
+  // an unrelated shared-settings change (say, editing the tariff) doesn't
+  // requeue an identical order and retrigger the grid's FLIP animation.
+  useEffect(() => {
+    const onChange = () => {
+      const next = read()
+      setStored((current) => (sameOrder(current, next) ? current : next))
+    }
+    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
+    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
+  }, [])
 
   // ids is rebuilt every render by the caller, so the join is what actually
   // says whether the available set changed.
@@ -55,12 +66,12 @@ export function useWidgetOrder(ids: string[]) {
 
   const save = useCallback((next: string[]) => {
     setStored(next)
-    localStorage.setItem(LS_ORDER, JSON.stringify(next))
+    patchSharedSettings({ widgetOrder: next })
   }, [])
 
   const reset = useCallback(() => {
     setStored([])
-    localStorage.removeItem(LS_ORDER)
+    patchSharedSettings({ widgetOrder: [] })
   }, [])
 
   return { order, save, reset, customised: stored.length > 0 }

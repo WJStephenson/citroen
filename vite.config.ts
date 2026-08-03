@@ -37,6 +37,9 @@ export default defineConfig(({ mode }) => {
   // In production nginx strips /api/ before proxying to psa_car_controller:5000.
   // The dev server does the same rewrite so the app code is identical either way.
   const target = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:5001'
+  // Same idea for the shared settings store — see deploy/settings_store.py
+  // and `npm run settings-store`.
+  const settingsTarget = env.VITE_SETTINGS_PROXY_TARGET || 'http://127.0.0.1:5002'
 
   return {
     plugins: [react(), stampServiceWorker()],
@@ -47,6 +50,11 @@ export default defineConfig(({ mode }) => {
           target,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
+        },
+        '/settings': {
+          target: settingsTarget,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/settings/, ''),
         },
       },
     },

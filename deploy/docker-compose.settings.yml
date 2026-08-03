@@ -1,0 +1,40 @@
+# Shared settings store — persists the VIN, poll interval, tariff, dashboard
+# layout and charge start/stop/limit hints, so every phone controlling the
+# car sees the same values instead of each browser's own localStorage.
+#
+# Needs settings_store.py copied alongside this file on the server (it's a
+# stdlib-only Python script, same style as mock/mock_psacc.py — no image to
+# build, just the interpreter already inside the python:3-alpine image below).
+#
+#   docker compose -f docker-compose.settings.yml up -d
+#   docker logs -f settings_store
+
+services:
+  settings_store:
+    image: python:3.13-alpine
+    container_name: settings_store
+    restart: unless-stopped
+    working_dir: /app
+
+    volumes:
+      - ./settings_store.py:/app/settings_store.py:ro
+      # The one shared settings.json lives here. Back it up along with
+      # psa_config — losing it just means everyone's layout and tariff reset
+      # to defaults, not a re-enrolment, but it's still someone's work.
+      - ./settings_data:/data
+
+    environment:
+      - SETTINGS_STORE_PATH=/data/settings.json
+
+    command: ["python", "-u", "settings_store.py"]
+
+    # Not published to the host: nginx reaches it over the Docker network by
+    # container name, the same way it reaches psa_car_controller.
+    networks:
+      - proxy
+
+networks:
+  # The network your nginx container is already on — see docker-compose.psa.yml.
+  proxy:
+    external: true
+    name: proxy

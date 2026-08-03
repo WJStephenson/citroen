@@ -1,18 +1,21 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   clearChargeStartHour,
   clearChargeStopHour,
   setChargeStartHour,
   setChargeStopHour,
 } from '../api/client'
+import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from '../api/sharedSettings'
 import type { Commands } from '../hooks/useCommands'
 import { BoltIcon, CheckIcon, ClockIcon } from './Icons'
 import { Widget } from './Widget'
 
-const LS_START = 'ec4.chargeStart'
-const LS_STOP = 'ec4.chargeStop'
-
 const DAY = 1440
+
+function readHint(key: 'chargeStartHint' | 'chargeStopHint'): string | null {
+  const raw = getSharedSettings()[key]
+  return typeof raw === 'string' ? raw : null
+}
 
 /*
  * Dial geometry, in the 100×100 viewBox the ring is drawn in. A charging window
@@ -50,10 +53,35 @@ const STUB = 15
  * the first field of one.
  */
 export function ChargeWindowWidget({ commands }: { commands: Commands }) {
-  const [start, setStart] = useState(() => localStorage.getItem(LS_START) ?? '00:30')
-  const [stop, setStop] = useState(() => localStorage.getItem(LS_STOP) ?? '07:00')
-  const [savedStart, setSavedStart] = useState(() => localStorage.getItem(LS_START))
-  const [savedStop, setSavedStop] = useState(() => localStorage.getItem(LS_STOP))
+  const [start, setStart] = useState(() => readHint('chargeStartHint') ?? '00:30')
+  const [stop, setStop] = useState(() => readHint('chargeStopHint') ?? '07:00')
+  const [savedStart, setSavedStart] = useState(() => readHint('chargeStartHint'))
+  const [savedStop, setSavedStop] = useState(() => readHint('chargeStopHint'))
+
+  // Another device setting or clearing a time lands here without a reload.
+  // Only nudges the editable field if it still matched the old saved value —
+  // an in-progress local edit is never clobbered by a change made elsewhere.
+  const savedStartRef = useRef(savedStart)
+  savedStartRef.current = savedStart
+  const savedStopRef = useRef(savedStop)
+  savedStopRef.current = savedStop
+
+  useEffect(() => {
+    const onChange = () => {
+      const nextStart = readHint('chargeStartHint')
+      if (nextStart !== savedStartRef.current) {
+        setStart((draft) => (draft === savedStartRef.current ? (nextStart ?? '00:30') : draft))
+        setSavedStart(nextStart)
+      }
+      const nextStop = readHint('chargeStopHint')
+      if (nextStop !== savedStopRef.current) {
+        setStop((draft) => (draft === savedStopRef.current ? (nextStop ?? '07:00') : draft))
+        setSavedStop(nextStop)
+      }
+    }
+    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
+    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
+  }, [])
 
   /*
    * The dial carries a marker for the present, which is what makes "is the
@@ -91,7 +119,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
       label: `Setting charge start to ${start}`,
       send: async () => {
         const result = await setChargeStartHour(parsed[0], parsed[1])
-        localStorage.setItem(LS_START, start)
+        patchSharedSettings({ chargeStartHint: start })
         setSavedStart(start)
         return result
       },
@@ -107,10 +135,10 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
       send: async () => {
         const result = await setChargeStopHour(parsed[0], parsed[1])
         if (stopIsMidnight) {
-          localStorage.removeItem(LS_STOP)
+          patchSharedSettings({ chargeStopHint: null })
           setSavedStop(null)
         } else {
-          localStorage.setItem(LS_STOP, stop)
+          patchSharedSettings({ chargeStopHint: stop })
           setSavedStop(stop)
         }
         return result
@@ -124,7 +152,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
       label: 'Switching to immediate charging',
       send: async () => {
         const result = await clearChargeStartHour()
-        localStorage.removeItem(LS_START)
+        patchSharedSettings({ chargeStartHint: null })
         setSavedStart(null)
         return result
       },
@@ -136,7 +164,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
       label: 'Clearing stop time',
       send: async () => {
         const result = await clearChargeStopHour()
-        localStorage.removeItem(LS_STOP)
+        patchSharedSettings({ chargeStopHint: null })
         setSavedStop(null)
         return result
       },

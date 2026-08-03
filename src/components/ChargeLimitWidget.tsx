@@ -6,11 +6,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { setChargeLimit } from '../api/client'
+import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from '../api/sharedSettings'
 import type { Commands } from '../hooks/useCommands'
 import { LimitIcon } from './Icons'
 import { Widget, WidgetNote } from './Widget'
-
-const LS_LIMIT = 'ec4.chargeLimit'
 
 const MIN = 50
 const MAX = 100
@@ -28,8 +27,8 @@ const snap = (value: number) =>
   Math.min(MAX, Math.max(MIN, Math.round(value / STEP) * STEP))
 
 function stored(): number | null {
-  const value = Number(localStorage.getItem(LS_LIMIT))
-  return Number.isFinite(value) && value > 0 ? value : null
+  const value = getSharedSettings().chargeLimitHint
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
 /**
@@ -44,8 +43,10 @@ function stored(): number | null {
  * gets picked up for rearranging instead.
  *
  * get_vehicleinfo does not report the configured threshold back, so the last
- * value we successfully set is remembered locally and shown as current. It is a
- * display hint, not authoritative state.
+ * value *any* device successfully set is remembered and shown as current. It
+ * is a display hint, not authoritative state — and it is shared across every
+ * device controlling this car (see api/sharedSettings.ts), since the limit
+ * describes the car, not the phone that last touched it.
  */
 export function ChargeLimitWidget({ commands }: { commands: Commands }) {
   const [saved, setSaved] = useState<number | null>(stored)
@@ -53,6 +54,22 @@ export function ChargeLimitWidget({ commands }: { commands: Commands }) {
   const [dragging, setDragging] = useState(false)
   const [settling, setSettling] = useState(false)
   const gesture = useRef<{ pointerId: number; startY: number; from: number; live: boolean } | null>(null)
+  const savedRef = useRef(saved)
+  savedRef.current = saved
+
+  // Another device setting the limit lands here without a reload. Only
+  // nudges the pending value if it still matched the old saved one — a
+  // swipe already in progress locally is never clobbered.
+  useEffect(() => {
+    const onChange = () => {
+      const next = stored()
+      if (next === savedRef.current) return
+      setValue((draft) => (draft === savedRef.current ? (next ?? DEFAULT) : draft))
+      setSaved(next)
+    }
+    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
+    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
+  }, [])
 
   const busy = commands.active?.kind === 'chargeLimit'
   const blocked = Boolean(commands.active)
@@ -64,7 +81,7 @@ export function ChargeLimitWidget({ commands }: { commands: Commands }) {
       label: `Setting charge limit to ${next}%`,
       send: async () => {
         const result = await setChargeLimit(next)
-        localStorage.setItem(LS_LIMIT, String(next))
+        patchSharedSettings({ chargeLimitHint: next })
         setSaved(next)
         return result
       },

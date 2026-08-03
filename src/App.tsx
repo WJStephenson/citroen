@@ -122,7 +122,7 @@ export default function App() {
         },
         { id: 'lights', label: 'Lights', node: <LightsWidget commands={commands} /> },
         { id: 'horn', label: 'Horn', node: <HornWidget commands={commands} /> },
-        { id: 'lock', label: 'Locks', node: <LockWidget commands={commands} /> },
+        { id: 'lock', label: 'Locks', span: 2, node: <LockWidget commands={commands} /> },
         {
           id: 'chargeLimit',
           label: 'Charge limit',

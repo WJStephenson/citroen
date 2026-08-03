@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchChargingSessions } from '../api/client'
 import { ApiError, type ChargingSession } from '../api/types'
+import { setFreeSession } from '../freeSessions'
+import { useFreeSessions } from '../hooks/useFreeSessions'
 import { useTariff } from '../hooks/useTariff'
 import { costOf, formatMoney, type Tariff } from '../tariff'
 import { ChartIcon } from './Icons'
@@ -83,6 +85,10 @@ export function ChargingHistoryWidget() {
   const [selected, setSelected] = useState<number | null>(null)
   const [asTable, setAsTable] = useState(false)
   const tariff = useTariff()
+  const freeStarts = useFreeSessions()
+  const freeSet = new Set(freeStarts)
+  const isFree = (session: ChargingSession) =>
+    session.startedAt !== null && freeSet.has(session.startedAt.getTime())
 
   const load = () => {
     setError(null)
@@ -140,13 +146,17 @@ export function ChargingHistoryWidget() {
   const active = selected !== null ? recent[selected] : null
   const total = values.reduce((sum, v) => sum + v, 0)
   // A session nobody could price is not a free charge, so it must not be added
-  // in as a zero — it is left out of the total and the label says so.
-  const costs = recent.map((session) => priceOf(session, tariff))
+  // in as a zero — it is left out of the total and the label says so. A
+  // session marked free *is* known to have cost nothing, so it counts as
+  // priced at £0 rather than being left out.
+  const costs = recent.map((session) => (isFree(session) ? 0 : priceOf(session, tariff)))
   const priced = costs.filter((cost): cost is number => cost !== null)
   const spend = priced.reduce((sum, cost) => sum + cost, 0)
+  const activeFree = active ? isFree(active) : false
   // The two-rate split for the selected session, so the panel can show where
-  // the money went rather than just how much of it.
-  const activeCost = active ? costOf(active, tariff) : null
+  // the money went rather than just how much of it. Not for a free session —
+  // there is no split to show.
+  const activeCost = active && !activeFree ? costOf(active, tariff) : null
 
   return (
     <Widget icon={<ChartIcon />} label="Charging history" className="widget-history">
@@ -291,6 +301,11 @@ export function ChargingHistoryWidget() {
                     d={barPath(x, y, barWidth, height)}
                     className={`chart-bar ${dimmed ? 'is-dimmed' : ''}`}
                   />
+                  {/* A mark, not a recolour — the bar itself keeps meaning
+                      magnitude and nothing else. */}
+                  {isFree(session) && (
+                    <circle cx={x + barWidth - 3} cy={y + 4} r="2.5" className="chart-free-dot" />
+                  )}
                   {labelled && (
                     <text x={x + barWidth / 2} y={y - 5} className="chart-value" textAnchor="middle">
                       {value.toFixed(1)}
@@ -340,7 +355,23 @@ export function ChargingHistoryWidget() {
             {active ? (
               <>
                 <div className="history-detail-head">
-                  <p className="history-detail-date">{shortDate(active.startedAt)}</p>
+                  <div className="history-detail-title">
+                    <p className="history-detail-date">{shortDate(active.startedAt)}</p>
+                    {/* Free charging (a workplace charger, say) has no tariff
+                        cost, so it is a fact recorded about the session rather
+                        than something worked out from it — a toggle, not a
+                        derived figure. */}
+                    {active.startedAt && (
+                      <button
+                        type="button"
+                        className={`free-toggle ${activeFree ? 'is-on' : ''}`}
+                        aria-pressed={activeFree}
+                        onClick={() => setFreeSession(active.startedAt as Date, !activeFree)}
+                      >
+                        {activeFree ? 'Free charge' : 'Mark as free'}
+                      </button>
+                    )}
+                  </div>
                   <p className="history-detail-energy">
                     {active.energy === null ? '—' : active.energy.toFixed(1)}
                     <span>kWh</span>
@@ -373,8 +404,12 @@ export function ChargingHistoryWidget() {
                 <div className="history-detail-meta">
                   <span>{duration(active.durationMinutes)}</span>
                   {active.mode && <span>{active.mode}</span>}
-                  {priceOf(active, tariff) !== null && (
-                    <span>{formatMoney(priceOf(active, tariff) as number)}</span>
+                  {activeFree ? (
+                    <span className="is-free">Free</span>
+                  ) : (
+                    priceOf(active, tariff) !== null && (
+                      <span>{formatMoney(priceOf(active, tariff) as number)}</span>
+                    )
                   )}
                 </div>
 

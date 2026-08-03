@@ -1786,7 +1786,8 @@ button {
  */
 .button:not(:disabled):active,
 .segment:not(:disabled):active,
-.icon-button:not(:disabled):active {
+.icon-button:not(:disabled):active,
+.free-toggle:active {
   transform: scale(0.97);
 }
 
@@ -1799,6 +1800,7 @@ button {
 .time-input:focus-visible,
 .pin-input:focus-visible,
 .widget-cell:focus-visible,
+.free-toggle:focus-visible,
 .field input:focus-visible {
   outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
@@ -1880,6 +1882,14 @@ button {
 
 .chart-hit {
   cursor: pointer;
+}
+
+/* Marks a free session without recolouring the bar — height keeps meaning
+   magnitude and nothing else. */
+.chart-free-dot {
+  fill: var(--warn);
+  stroke: var(--surface);
+  stroke-width: 1;
 }
 
 /* Hairline, solid, one step off the surface — never dashed. */
@@ -1992,10 +2002,35 @@ button {
   gap: 0.75rem;
 }
 
+.history-detail-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
 .history-detail-date {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
+}
+
+/* A toggle, not a button that does something once — pressed state is the
+   whole point, so it wears the same on/off language as .segment. */
+.free-toggle {
+  padding: 0.2rem 0.5rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--track);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.free-toggle.is-on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-fg);
 }
 
 .history-detail-energy {
@@ -2021,6 +2056,11 @@ button {
   font-size: 0.75rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.history-detail-meta .is-free {
+  color: var(--accent-fg);
+  font-weight: 600;
 }
 
 /* How the two rates carved the session up. Only the cheap half is coloured —

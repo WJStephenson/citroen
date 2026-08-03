@@ -26,6 +26,7 @@ export function LightsWidget({ commands }: { commands: Commands }) {
       shape="sunny"
       className="widget-action"
       working={busy}
+      outcome={commands.outcomeFor('lights')}
       action={{
         label: 'Flash the lights for 10 seconds',
         disabled: Boolean(commands.active),
@@ -71,6 +72,7 @@ export function HornWidget({ commands }: { commands: Commands }) {
       shape="boom"
       className={`widget-action ${armed ? 'is-armed' : ''}`}
       working={busy}
+      outcome={commands.outcomeFor('horn')}
       action={{
         label: armed ? 'Tap again to sound the horn' : 'Sound the horn',
         disabled: Boolean(commands.active),

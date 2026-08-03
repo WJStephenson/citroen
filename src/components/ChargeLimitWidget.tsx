@@ -142,9 +142,15 @@ export function ChargeLimitWidget({ commands }: { commands: Commands }) {
       : `Set to ${saved}%`
 
   return (
-    <Widget icon={<LimitIcon />} label="Charge limit" className="widget-limit">
+    <Widget
+      icon={<LimitIcon />}
+      label="Charge limit"
+      className="widget-limit"
+      working={busy}
+      outcome={commands.outcomeFor('chargeLimit')}
+    >
       <div
-        className={`limit-swipe ${dragging ? 'is-dragging' : ''} ${busy ? 'is-busy' : ''}`}
+        className={`limit-swipe ${dragging ? 'is-dragging' : ''}`}
         role="slider"
         tabIndex={0}
         aria-label="Maximum charge"

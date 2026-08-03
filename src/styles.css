@@ -128,7 +128,6 @@ button {
 
 .app {
   position: relative; /* containing block for .pull-indicator */
-  z-index: 1; /* above the ambient command layer */
   max-width: 34rem;
   margin: 0 auto;
   padding: calc(env(safe-area-inset-top) + 0.75rem) var(--page-pad)
@@ -281,29 +280,6 @@ button {
   text-align: center;
   font-size: 0.75rem;
   color: var(--muted);
-}
-
-/* ---------- ambient command layer ---------- */
-
-/*
- * Painted under the whole app while a command is in flight. Inert by
- * construction: fixed, behind the content, and pointer-events: none, so it can
- * never swallow a tap meant for a control underneath it.
- */
-.ambient {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  pointer-events: none;
-  animation: ambient-in 420ms ease-out;
-}
-
-@keyframes ambient-in {
-  from {
-    opacity: 0;
-  }
 }
 
 /* ---------- widget grid ---------- */
@@ -629,6 +605,267 @@ button {
   }
 }
 
+/* ---------- a command in flight: the travelling ring ---------- */
+
+/*
+ * A light running round the edge of the tile whose command is on the wire. It
+ * replaces the toast that used to say the same thing in the corner of the
+ * screen: the tile you pressed is where you are already looking, and a mark on
+ * it needs no words to say which command it belongs to.
+ *
+ * The sweep is an oversized square carrying a conic gradient that simply turns,
+ * and the ring is a mask on its parent. Rotating a real element rather than
+ * animating an angle inside the gradient keeps this working without @property,
+ * and cutting the ring with a mask rather than a border means the *shaped*
+ * tiles get a ring in their own silhouette — the tile's clip-path cuts the
+ * sweep exactly where it cuts everything else.
+ */
+.widget-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 2px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: ring-in 220ms ease-out;
+
+  /*
+   * Everything inside the padding box is cut away, leaving the border's width
+   * as the ring. Both mask boxes follow the tile's corner radii, so a tile with
+   * a 44px corner and a 14px one keeps an even ring round both — which a
+   * content-box cut-out, whose corners are square, would not.
+   *
+   * Note there is deliberately no `overflow: hidden` holding the sweep in:
+   * overflow clips at the *padding* edge, which is precisely the ring, so it
+   * would cut away the only part that is meant to show. The border-box mask
+   * layer is what keeps the sweep inside the tile.
+   */
+  -webkit-mask-image: linear-gradient(#000, #000), linear-gradient(#000, #000);
+  -webkit-mask-clip: padding-box, border-box;
+  -webkit-mask-composite: xor;
+  mask-image: linear-gradient(#000, #000), linear-gradient(#000, #000);
+  mask-clip: padding-box, border-box;
+  mask-composite: exclude;
+}
+
+/*
+ * A lobed tile draws its own outline instead — a separate element, because a
+ * radial mask cannot follow a silhouette whose radius swings by ±11px: it pools
+ * into a blob at the lobes and thins to nothing in the valleys. The shape's own
+ * path, stroked, *is* the outline.
+ */
+.widget-trace {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  animation: ring-in 220ms ease-out;
+}
+
+.widget-trace path {
+  fill: none;
+  stroke: var(--accent);
+  /*
+   * The stroke straddles the path, and the path is exactly where the tile's
+   * clip-path cuts — so half of it is clipped away and the visible ring is half
+   * this wide. Doubled to land at the ~2px the box tiles carry.
+   */
+  stroke-width: 0.026;
+  /* Against pathLength=100 these are percentages of the outline: a fifth of the
+     way round, lit, chasing the rest of it. */
+  stroke-dasharray: 20 80;
+  animation: ring-trace 1.3s linear infinite;
+}
+
+@keyframes ring-trace {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.widget-ring-sweep {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  /* Square, and wider than the tile's own diagonal, so no corner of it ever
+     swings into view as it turns. */
+  width: 150%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  /* A comet: a hard head with a long tail behind it, so the direction of travel
+     is legible rather than just a glow going round. */
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 170deg,
+    color-mix(in srgb, var(--accent) 30%, transparent) 300deg,
+    var(--accent) 358deg,
+    var(--accent) 360deg
+  );
+  animation: ring-sweep 1.3s linear infinite;
+}
+
+@keyframes ring-sweep {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes ring-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- a command that has finished ---------- */
+
+/*
+ * The result, drawn over the tile that asked for it — the other half of what
+ * the toasts did. It covers the tile's reading, which is why it is given only
+ * as long as it takes to read: on success the tile's own number is the more
+ * useful thing to be looking at within a couple of seconds.
+ *
+ * The fade-out is a transition driven by a class from useCommands rather than
+ * an animation ending in `forwards`, because the reduced-motion rule at the
+ * foot of this file collapses every animation to 0.01ms — which would land such
+ * an animation on its hidden end state immediately and mean nothing was ever
+ * seen.
+ */
+.widget-outcome {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-radius: inherit;
+  text-align: center;
+  /* Inert: a tap during the confirmation still reaches the tile underneath. */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface) 86%, var(--accent));
+  color: var(--accent-fg);
+  animation: outcome-in 240ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  transition:
+    opacity 320ms ease,
+    scale 320ms ease;
+}
+
+.widget-outcome.is-error {
+  background: color-mix(in srgb, var(--surface) 86%, var(--danger));
+  color: var(--danger-fg);
+}
+
+.widget-outcome.is-leaving {
+  opacity: 0;
+  scale: 0.96;
+}
+
+/* The shaped tiles cut their own corners off, so the mark and its message have
+   to keep to the middle. */
+.widget.is-rounded .widget-outcome {
+  padding: 20%;
+}
+
+@keyframes outcome-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.widget-outcome-mark {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px currentColor;
+  /* Overshoots — the one moment on the dashboard that is allowed to be pleased
+     with itself. */
+  animation: outcome-pop 460ms cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+.widget-outcome-mark svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+/* The mark is drawn on rather than faded in: a stroke that arrives in the
+   direction it is written reads as the app finishing something. */
+.widget-outcome-mark svg path,
+.widget-outcome-mark svg line {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: mark-draw 300ms 120ms cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+
+/* The two arms of a cross are one gesture each, so the second follows the
+   first rather than racing it. */
+.widget-outcome-mark svg line:nth-child(2) {
+  animation-delay: 280ms;
+}
+
+@keyframes mark-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* One ring leaving the mark, once. */
+.widget-outcome-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px currentColor;
+  animation: outcome-ripple 720ms 60ms ease-out forwards;
+}
+
+@keyframes outcome-pop {
+  from {
+    scale: 0.4;
+    opacity: 0;
+  }
+}
+
+@keyframes outcome-ripple {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+    scale: 2.1;
+  }
+}
+
+.widget-outcome-text {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--text);
+  /* A bridge error can be a whole sentence; a tile is not a whole sentence
+     wide. It is read out in full by the live region in App either way. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  animation: outcome-text-in 300ms 140ms ease-out backwards;
+}
+
+@keyframes outcome-text-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
 /* ---------- the charge tile ---------- */
 
 /*
@@ -798,7 +1035,11 @@ button {
 
 /* ---------- climate tile ---------- */
 
+/* The clover centres everything else in the tile; the switch has to be told,
+   because .switch pins itself to the start of the line for the settings sheet's
+   left-aligned rows. */
 .widget-precondition .switch {
+  align-self: center;
   margin-top: 0.7rem;
 }
 
@@ -1023,7 +1264,11 @@ button {
  * children already sat dimmed, and strobed the whole block.
  *
  * Replaced with one indeterminate bar, clipped to the control's own box so it
- * can never bleed past its edges, reading identically on every control.
+ * can never bleed past its edges.
+ *
+ * The tile's own ring (.widget-ring) now says a command is in flight, so this
+ * is only left on controls where the tile alone would be ambiguous — the
+ * charging window's four buttons, which send four different commands.
  */
 .is-busy {
   position: relative;
@@ -1052,13 +1297,6 @@ button {
   100% {
     transform: translateX(100%) scaleX(0.35);
   }
-}
-
-/* The switch is a fully rounded pill, so a square-ended bar would poke into
-   the corners it is clipped against. */
-.switch.is-busy::after {
-  height: 3px;
-  border-radius: 999px;
 }
 
 @keyframes pulse {
@@ -1449,46 +1687,6 @@ button {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-.toasts {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(env(safe-area-inset-bottom) + 5.5rem);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
-  z-index: 30;
-}
-
-.toast {
-  width: min(100%, 32rem);
-  text-align: left;
-  border: none;
-  border-radius: 12px;
-  padding: 0.75rem 0.875rem;
-  font-size: 0.875rem;
-  background: var(--surface-2);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
-  animation: rise 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
-}
-
-.toast.is-ok {
-  border-left: 3px solid var(--accent);
-}
-
-.toast.is-error {
-  border-left: 3px solid var(--danger);
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-
 /* ---------- skeleton / empty ---------- */
 
 .skeleton {
@@ -1691,5 +1889,21 @@ button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /*
+   * Stopping the sweep would leave a single stationary arc, which reads as a
+   * decoration rather than as work in progress. The gradient goes flat instead,
+   * so the mask still cuts a ring — it just no longer travels.
+   */
+  .widget-ring-sweep {
+    background: var(--accent);
+  }
+
+  /* Likewise the mark: with the drawing-on collapsed it must not be left in
+     its own start state, which is a stroke that was never drawn at all. */
+  .widget-outcome-mark svg path,
+  .widget-outcome-mark svg line {
+    stroke-dashoffset: 0;
   }
 }

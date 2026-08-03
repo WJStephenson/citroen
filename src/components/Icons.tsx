@@ -68,6 +68,18 @@ export function CheckIcon() {
   )
 }
 
+/* Two separate strokes rather than one path with a jump in it: they are drawn
+   on in turn when a command fails, and a single path would draw the invisible
+   move between the arms as if it were part of the mark. */
+export function CrossIcon() {
+  return (
+    <svg {...base}>
+      <line x1="6.5" y1="6.5" x2="17.5" y2="17.5" />
+      <line x1="17.5" y1="6.5" x2="6.5" y2="17.5" />
+    </svg>
+  )
+}
+
 export function BoltIcon() {
   return (
     <svg {...light}>

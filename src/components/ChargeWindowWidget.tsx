@@ -36,6 +36,13 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
   const [savedStop, setSavedStop] = useState(() => localStorage.getItem(LS_STOP))
 
   const disabled = Boolean(commands.active)
+  /*
+   * One tile, three commands. The ring says this tile is working; the button's
+   * own bar says which of its actions — the tile alone could not, and "Set" for
+   * the start hour and "Set" for the stop hour fail independently.
+   */
+  const kind = commands.active?.kind
+  const busy = kind === 'chargeStart' || kind === 'chargeStop' || kind === 'chargeNow'
 
   const parse = (value: string): [number, number] | null => {
     const [h, m] = value.split(':').map(Number)
@@ -120,7 +127,12 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
     savedStart !== null && savedStop !== null && savedStart > savedStop ? ' (overnight)' : ''
 
   return (
-    <Widget icon={<ClockIcon />} label="Charging window">
+    <Widget
+      icon={<ClockIcon />}
+      label="Charging window"
+      working={busy}
+      outcome={commands.outcomeFor('chargeStart', 'chargeStop', 'chargeNow')}
+    >
       <WidgetNote>
         {window}
         {overnight}
@@ -140,7 +152,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
         />
         <button
           type="button"
-          className={`button ${commands.active?.kind === 'chargeStart' ? 'is-busy' : ''}`}
+          className={`button ${kind === 'chargeStart' ? 'is-busy' : ''}`}
           onClick={applyStart}
           disabled={disabled || start === savedStart}
         >
@@ -160,7 +172,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
         />
         <button
           type="button"
-          className={`button ${commands.active?.kind === 'chargeStop' ? 'is-busy' : ''}`}
+          className={`button ${kind === 'chargeStop' ? 'is-busy' : ''}`}
           onClick={applyStop}
           disabled={disabled || (stop === savedStop && !stopIsMidnight)}
         >
@@ -171,7 +183,7 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
       <div className="row">
         <button
           type="button"
-          className={`button ${commands.active?.kind === 'chargeNow' ? 'is-busy' : ''}`}
+          className={`button ${kind === 'chargeNow' ? 'is-busy' : ''}`}
           onClick={clearStart}
           disabled={disabled}
         >

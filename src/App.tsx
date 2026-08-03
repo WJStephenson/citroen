@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AmbientCanvas, type AmbientMode } from './components/AmbientCanvas'
 import { ChargeLimitWidget } from './components/ChargeLimitWidget'
 import { ChargeWindowWidget } from './components/ChargeWindowWidget'
 import { ChargingHistoryWidget } from './components/ChargingHistoryWidget'
@@ -16,7 +15,6 @@ import {
   ChargeWidget,
   OdometerWidget,
 } from './components/StatWidgets'
-import { Toasts } from './components/Toasts'
 import { WidgetGrid, type WidgetItem } from './components/WidgetGrid'
 import { getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
@@ -70,21 +68,6 @@ export default function App() {
   const stale = vehicle.fetchedAt !== null && Date.now() - vehicle.fetchedAt.getTime() > 45 * 60_000
 
   /*
-   * A command in flight owns the screen; otherwise pre-conditioning that is
-   * actually running keeps a quieter version of its own ambience, since that
-   * state can persist for many minutes and should not be as loud as an action
-   * you just took.
-   */
-  const activeKind = commands.active?.kind
-  const ambient: AmbientMode =
-    activeKind === 'precondition' || activeKind === 'lights' || activeKind === 'horn'
-      ? activeKind
-      : vehicle.state?.preconditioning === 'on'
-        ? 'precondition'
-        : null
-  const ambientIntensity = commands.active ? 1 : 0.4
-
-  /*
    * The canonical layout, which is also the fallback order and the order a
    * newly available tile is slotted back into. Charge leads because it is the
    * question the app exists to answer; the tiles you configure once and forget
@@ -130,112 +113,114 @@ export default function App() {
     : []
 
   return (
-    <>
-      <AmbientCanvas mode={ambient} intensity={ambientIntensity} />
+    <div
+      className={`app ${editingLayout ? 'is-editing-layout' : ''}`}
+      style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}
+    >
       <div
-        className={`app ${editingLayout ? 'is-editing-layout' : ''}`}
-        style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}
+        className={`pull-indicator ${pull.armed ? 'is-armed' : ''}`}
+        style={{ opacity: pull.pull / pull.threshold }}
+        aria-hidden="true"
       >
-        <div
-          className={`pull-indicator ${pull.armed ? 'is-armed' : ''}`}
-          style={{ opacity: pull.pull / pull.threshold }}
-          aria-hidden="true"
-        >
-          {pull.armed ? 'Release to refresh' : 'Pull to refresh'}
-        </div>
-
-        <header className="app-bar">
-          <div>
-            <h1>ë-C4</h1>
-            <p className="app-bar-sub">
-              {vehicle.refreshing ? 'Refreshing…' : `Updated ${relativeTime(vehicle.fetchedAt)}`}
-            </p>
-          </div>
-          <div className="app-bar-actions">
-            {state && (
-              <button
-                type="button"
-                className={`icon-button ${editingLayout ? 'is-selected' : ''}`}
-                onClick={() => setEditingLayout((open) => !open)}
-                aria-pressed={editingLayout}
-                aria-label="Rearrange the dashboard"
-              >
-                <LayoutIcon />
-              </button>
-            )}
-            <button
-              type="button"
-              className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
-              onClick={() => void liveRefresh()}
-              disabled={vehicle.refreshing}
-              aria-label="Refresh vehicle state from the car"
-            >
-              <RefreshIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Settings"
-            >
-              <SettingsIcon />
-            </button>
-          </div>
-        </header>
-
-        {updateReady && (
-          <button type="button" className="banner is-info" onClick={applyUpdate}>
-            A new version is ready — tap to reload
-          </button>
-        )}
-
-        {vinMissing && (
-          <button type="button" className="banner is-warn" onClick={() => setSettingsOpen(true)}>
-            No VIN configured — open Settings to add one
-          </button>
-        )}
-
-        {vehicle.error && (
-          <div className="banner is-error" role="alert">
-            {vehicle.error.message}
-          </div>
-        )}
-
-        <main className="content">
-          {vehicle.loading && !state ? (
-            <div className="skeleton" aria-label="Loading vehicle state">
-              <div className="skeleton-car" />
-              <div className="skeleton-bar" />
-            </div>
-          ) : state ? (
-            <>
-              <CarHero />
-              {state.reportedAt && (
-                <p className="reported-at">Car last reported {relativeTime(state.reportedAt)}</p>
-              )}
-              <WidgetGrid
-                items={widgets}
-                editing={editingLayout}
-                onEditingChange={setEditingLayout}
-              />
-            </>
-          ) : (
-            <div className="empty">
-              <p>No vehicle data yet.</p>
-              <button type="button" className="button is-primary" onClick={() => void liveRefresh()}>
-                Try again
-              </button>
-            </div>
-          )}
-        </main>
-
-        {commands.active && <CommandOverlay command={commands.active} />}
-        <Toasts toasts={commands.toasts} onDismiss={commands.dismissToast} />
-
-        {settingsOpen && (
-          <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
-        )}
+        {pull.armed ? 'Release to refresh' : 'Pull to refresh'}
       </div>
-    </>
+
+      <header className="app-bar">
+        <div>
+          <h1>ë-C4</h1>
+          <p className="app-bar-sub">
+            {vehicle.refreshing ? 'Refreshing…' : `Updated ${relativeTime(vehicle.fetchedAt)}`}
+          </p>
+        </div>
+        <div className="app-bar-actions">
+          {state && (
+            <button
+              type="button"
+              className={`icon-button ${editingLayout ? 'is-selected' : ''}`}
+              onClick={() => setEditingLayout((open) => !open)}
+              aria-pressed={editingLayout}
+              aria-label="Rearrange the dashboard"
+            >
+              <LayoutIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
+            onClick={() => void liveRefresh()}
+            disabled={vehicle.refreshing}
+            aria-label="Refresh vehicle state from the car"
+          >
+            <RefreshIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+      </header>
+
+      {updateReady && (
+        <button type="button" className="banner is-info" onClick={applyUpdate}>
+          A new version is ready — tap to reload
+        </button>
+      )}
+
+      {vinMissing && (
+        <button type="button" className="banner is-warn" onClick={() => setSettingsOpen(true)}>
+          No VIN configured — open Settings to add one
+        </button>
+      )}
+
+      {vehicle.error && (
+        <div className="banner is-error" role="alert">
+          {vehicle.error.message}
+        </div>
+      )}
+
+      <main className="content">
+        {vehicle.loading && !state ? (
+          <div className="skeleton" aria-label="Loading vehicle state">
+            <div className="skeleton-car" />
+            <div className="skeleton-bar" />
+          </div>
+        ) : state ? (
+          <>
+            <CarHero />
+            {state.reportedAt && (
+              <p className="reported-at">Car last reported {relativeTime(state.reportedAt)}</p>
+            )}
+            <WidgetGrid
+              items={widgets}
+              editing={editingLayout}
+              onEditingChange={setEditingLayout}
+            />
+          </>
+        ) : (
+          <div className="empty">
+            <p>No vehicle data yet.</p>
+            <button type="button" className="button is-primary" onClick={() => void liveRefresh()}>
+              Try again
+            </button>
+          </div>
+        )}
+      </main>
+
+      {commands.active && <CommandOverlay command={commands.active} />}
+
+      {/* Command results are drawn on the tile that raised them, which says
+          nothing to a screen reader — so they are announced once, here. */}
+      <p className="visually-hidden" role="status">
+        {commands.outcome && !commands.outcome.leaving ? commands.outcome.message : ''}
+      </p>
+
+      {settingsOpen && (
+        <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
+      )}
+    </div>
   )
 }

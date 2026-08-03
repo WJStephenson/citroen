@@ -79,25 +79,14 @@ export function LockWidget({ commands }: { commands: Commands }) {
       working={busy}
       outcome={commands.outcomeFor('lock')}
     >
-      <p className={`state-word ${armed ? 'is-warn' : ''}`}>
-        {sending === 'lock'
-          ? 'Locking'
-          : sending === 'unlock'
-            ? 'Unlocking'
-            : lockArmed
-              ? 'Tap again to lock'
-              : unlockArmed
-                ? 'Tap again to unlock'
-                : 'Ready'}
-      </p>
       <WidgetNote tone={armed ? 'warn' : undefined}>
         {lockArmed ? 'This will lock the doors' : unlockArmed ? 'This will unlock the doors' : 'Asks twice'}
       </WidgetNote>
 
-      <div className="window-actions">
+      <div className="lock-actions">
         <button
           type="button"
-          className={`button is-wide ${lockArmed ? 'is-armed' : ''} ${sending === 'lock' ? 'is-busy' : ''}`}
+          className={`button ${lockArmed ? 'is-armed' : ''} ${sending === 'lock' ? 'is-busy' : ''}`}
           onClick={pressLock}
           disabled={disabled}
           aria-label={lockArmed ? 'Tap again to lock the doors' : 'Lock the doors'}
@@ -107,7 +96,7 @@ export function LockWidget({ commands }: { commands: Commands }) {
         </button>
         <button
           type="button"
-          className={`button is-wide ${unlockArmed ? 'is-armed' : ''} ${sending === 'unlock' ? 'is-busy' : ''}`}
+          className={`button ${unlockArmed ? 'is-armed' : ''} ${sending === 'unlock' ? 'is-busy' : ''}`}
           onClick={pressUnlock}
           disabled={disabled}
           aria-label={unlockArmed ? 'Tap again to unlock the doors' : 'Unlock the doors'}

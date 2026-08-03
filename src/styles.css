@@ -1433,6 +1433,16 @@ button {
   flex: 1;
 }
 
+/* ---------- locks tile ---------- */
+
+.lock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.6rem;
+}
+
 /* ---------- rearrange bar ---------- */
 
 .edit-bar {

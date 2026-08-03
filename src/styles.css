@@ -96,10 +96,20 @@ body {
   color: var(--text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior-y: contain;
   /* Belt-and-braces: nothing on this page should ever be wider than the
      viewport, no matter what a child element does. */
   overflow-x: hidden;
+}
+
+/*
+ * Only on the actual scrolling element (documentElement is
+ * document.scrollingElement here; body never overflows on its own). Setting
+ * this on body too silently ate every scroll gesture: body has nowhere to
+ * scroll, but "contain" told the browser not to chain the gesture up to html
+ * either, so it was just swallowed.
+ */
+html {
+  overscroll-behavior-y: contain;
 }
 
 body {
@@ -636,15 +646,27 @@ button {
  * because a percentage in mask-position is resolved against the positioning
  * area *minus the mask image* — a 16px band would land up to 16px above the
  * line it is meant to mark, and drift away from the solid body under it.
+ *
+ * Water is only wavy while energy is actually going in. Idle, --wave-h
+ * collapses to a sliver rather than 0 — some engines treat a 0-height mask
+ * layer as unspecified and fall back to the image's natural size, which would
+ * draw the wave at full height instead of hiding it. At 0.6px the band is
+ * there for the mask math but reads as a flat edge. The existing mask-size /
+ * mask-position transition already animates the drop from full amplitude to
+ * that sliver, so charging start/stop gets the crossfade for free.
  */
 :root {
   --wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='16' viewBox='0 0 56 16'%3E%3Cpath d='M0 8C9.33 0 18.67 0 28 8s18.67 8 28 0v8H0Z' fill='%23000'/%3E%3C/svg%3E");
-  --wave-h: 16px;
+  --wave-h: 0.6px;
 }
 
 .widget-charge {
   --flood-h: 184px;
   height: var(--flood-h);
+}
+
+.widget-charge.is-charging {
+  --wave-h: 16px;
 }
 
 .widget-flood {

@@ -164,16 +164,22 @@ function num(value: unknown): number | null {
 }
 
 /**
- * `next_delayed_time` is a full RFC3339 timestamp (the next absolute moment
- * the car will start charging), not a plain hour — it can be tomorrow's date
- * if today's target already passed. The UI only ever shows a time-of-day, so
- * this collapses it to local HH:MM the same way the hour/minute inputs work.
+ * `next_delayed_time`'s swagger doc claims an RFC3339 timestamp, but in
+ * practice PSA sends the same PT#H#M duration shape `remaining_time` uses —
+ * confirmed against psa_car_controller's own parse_hour (common/utils.py),
+ * which every charge_now/get_charge_hour call relies on to read this exact
+ * field. "PT23H" is the stored hour 23:00, not "23 hours from now"; treating
+ * it as a real timestamp silently produces nothing, since `new Date("PT23H")`
+ * is Invalid Date.
  */
-function hhmmLocal(value: string | undefined): string | null {
+function hhmmFromDuration(value: string | undefined): string | null {
   if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?/.exec(value)
+  if (!match) return null
+  const hour = Number(match[1] ?? 0)
+  const minute = Number(match[2] ?? 0)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 /** [hour, minute] -> local HH:MM, the same shape the charge widgets edit. */
@@ -252,7 +258,7 @@ export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
     auxVoltage: num(raw.battery?.voltage),
     location: parseLocation(raw),
     reportedAt: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
-    chargeStartHour: hhmmLocal(charging?.next_delayed_time),
+    chargeStartHour: hhmmFromDuration(charging?.next_delayed_time),
     // Filled in by fetchVehicleState from the separate /charge_control read —
     // get_vehicleinfo has no opinion on either.
     chargeStopHour: null,

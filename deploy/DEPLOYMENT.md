@@ -80,6 +80,36 @@ docker exec <nginx-container> wget -qO- http://settings_store:8090/
 
 An empty `{}` is a healthy answer — it just means nothing has been saved yet.
 
+## 2c. Start "notify when charging finishes" (optional)
+
+Push notifications for a charge reaching its setpoint, delivered even with
+the phone asleep and no tab open — see charge_notify.py for why this has to
+be a separate always-running process rather than something the PWA's own
+poll loop can catch, and why "the setpoint" means whatever PSACC's charge
+control is configured to (percentage_threshold), not a value configured
+twice.
+
+Generate a keypair (`generate_vapid_keys.py` explains the one-liner), then on
+the server:
+
+```bash
+mkdir -p notify_data
+cp .env.example .env
+$EDITOR .env   # paste VAPID_PRIVATE_KEY and set VAPID_SUBJECT
+docker compose -f docker-compose.notify.yml up -d
+docker logs -f charge_notify
+```
+
+Put the *public* half in the PWA's own `.env` as `VITE_VAPID_PUBLIC_KEY`
+before step 4's build — a build without it makes push notifications quietly
+unavailable (Settings shows the toggle disabled) rather than broken, so
+this step is easy to skip by accident and not notice until someone asks
+where their notification went.
+
+Skippable entirely: the rest of the app works the same without it, the
+Settings toggle just won't do anything (`isPushSupported()` returns false
+without a public key baked into the build).
+
 ## 3. Do the first-time setup on the LAN, before exposing anything
 
 The bridge has **no authentication of its own**. Finish setup privately first.
@@ -109,6 +139,11 @@ On your workstation:
 npm install
 npm run build          # -> dist/
 ```
+
+If you set up step 2c, make sure `VITE_VAPID_PUBLIC_KEY` (the *public* half
+of that keypair) is in whatever `.env`/`.env.local` this build reads before
+running it — baked in at build time, not runtime, so a rebuild is needed
+after changing it.
 
 Copy `dist/` to the server, e.g. `/srv/citroen/`, and mount it into nginx. In
 nginx's compose file:

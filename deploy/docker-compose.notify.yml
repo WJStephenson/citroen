@@ -1,0 +1,65 @@
+# "Notify when charging finishes" — watches psa_car_controller and pushes to
+# every phone subscribed via the PWA's Settings sheet. See charge_notify.py
+# for what it actually does and why it has to be a separate always-running
+# process rather than something the PWA's own poll loop can catch.
+#
+# Needs charge_notify.py copied alongside this file on the server (stdlib +
+# one pip install at container start, no image to build — same as
+# settings_store.py). Also needs a .env file next to it (gitignored, not
+# this .env.example) holding the VAPID private key that pairs with the
+# public key baked into the PWA build (VITE_VAPID_PUBLIC_KEY):
+#
+#   VAPID_PRIVATE_KEY=<the raw base64url private key>
+#   VAPID_SUBJECT=mailto:you@example.com
+#
+# Generate a keypair with deploy/generate_vapid_keys.py.
+#
+# Explicit project name, for the same reason docker-compose.settings.yml has
+# one: this file lives alongside docker-compose.yml (psa_car_controller) and
+# docker-compose.settings.yml, so without it all three would default to the
+# same "citroen" project and each would see the others' containers as
+# orphans — risking `--remove-orphans` on one file stopping another's
+# container.
+#
+#   docker compose -f docker-compose.notify.yml up -d
+#   docker logs -f charge_notify
+
+name: citroen-notify
+
+services:
+  charge_notify:
+    image: python:3.13-slim
+    container_name: charge_notify
+    restart: unless-stopped
+    working_dir: /app
+
+    volumes:
+      - ./charge_notify.py:/app/charge_notify.py:ro
+      # Tracks "has this charging session already been notified", so a
+      # restart mid-session does not re-fire. Losing it just means at most
+      # one duplicate or one missed notification, not a re-enrolment like
+      # psa_config — back it up if convenient, don't lose sleep over it.
+      - ./notify_data:/data
+
+    env_file:
+      - ./.env
+
+    environment:
+      - PSACC_URL=http://psa_car_controller:5000
+      - SETTINGS_URL=http://settings_store:8090
+      # Every poll here is a local bridge read (from_cache / charge_control),
+      # never a call to the car, so this can run far more often than the
+      # PWA's own 20+ minute floor without any 12V-drain concern.
+      - POLL_SECONDS=300
+
+    command: sh -c "pip install --no-cache-dir --quiet pywebpush && python -u charge_notify.py"
+
+    # Not published to the host: it only ever calls out to psa_car_controller
+    # and settings_store by container name, and is never called into.
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: docker_proxy

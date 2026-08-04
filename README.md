@@ -75,6 +75,12 @@ only — you already have the domain, tunnel, and nginx container.
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
   with no network, then fetches live state.
+- **"Notify when charging finishes"** — a Web Push notification when the
+  battery reaches the Charge limit tile's setpoint (100% if that isn't
+  configured), delivered even with the app closed and the phone asleep —
+  see [Deploying](#deploying) and `deploy/charge_notify.py`. Off by default;
+  turned on per device in Settings, since not everyone in the household
+  necessarily wants to hear about it.
 
 ---
 
@@ -390,29 +396,57 @@ one — it is not currently surfaced in the UI.
 
 ### Things the bridge does not report back
 
-`get_vehicleinfo` returns no charge threshold and no charge schedule, so the app
-remembers the last value *any device* set and shows it as a hint (`Last set to
-80%`). That hint is shared across devices the same way the tariff and layout
-are — see [Shared settings](#shared-settings-across-devices) — since it
-describes the car, not whichever phone last touched it. If you change either
-from the car or the official app, this display will be stale either way. It is
-labelled as a hint rather than presented as live state.
+Door lock state, mainly — `get_vehicleinfo` has no field for it, so Lock is
+fire-and-forget like Horn and Lights: the tile has no idea whether the doors
+are actually locked, only what was last asked for.
 
-(`/charge_control` does echo back its own config as JSON, so the threshold could
-be read live if you want it — the schedule from `/charge_hour` cannot.)
+Charge threshold and charge schedule *used to* be on this list too, and the
+app used to paper over it the same way: remember the last value any device
+sent and show that as a hint, labelled as such rather than presented as live
+state. That was wrong in a way that mattered — a stop hour PSACC silently
+dropped (a re-auth after a connectivity outage does this; see
+`docker-compose.yml`'s `app_decoder.py` patch in the bridge's own deploy
+notes) kept showing as still set, with nothing to make the drift visible.
+
+Both are read live now instead:
+
+- **Charge limit / stop hour** — `/charge_control?vin=` with no
+  hour/minute/percentage params is read-only (`get_charge_control` in the
+  bridge's `api.py` only mutates when those are present) and echoes back its
+  current config either way. `api/client.ts::fetchChargeControlState` calls
+  it every poll.
+- **Charge start hour** — `get_vehicleinfo`'s `next_delayed_time` field
+  *does* carry it, just not as the RFC3339 timestamp its own swagger doc
+  claims — in practice it's the same `PT#H#M` duration shape
+  `remaining_time` uses (`"PT23H"` for a 23:00 stored hour), confirmed
+  against the bridge's own `parse_hour` (`common/utils.py`), which every
+  `charge_now`/`get_charge_hour` call relies on to read this exact field
+  the same way. See `hhmmFromDuration` in `api/client.ts`.
+
+Both tiles fall back to "not configured" honestly (see `chargeControlConfigured`
+on `VehicleState`) rather than showing a number nothing on the car is
+actually holding.
 
 ---
 
 ## Shared settings across devices
 
 Everyone in the household controls the same one car, so the settings that
-describe *the car* — VIN, background poll interval, electricity tariff,
-dashboard layout, and the "last set" charge start/stop/limit hints — are
-shared across every phone, not stored per-browser. Settings that describe the
-*viewer* instead — theme, distance/temperature units, the app lock's PIN or
-biometric enrolment — stay in that browser's own `localStorage`, since there is
-no single correct answer for those across a household (and a shared PIN would
-defeat the point of a *local* presence check).
+describe *the car* — VIN, background poll interval, electricity tariff, and
+dashboard layout — are shared across every phone, not stored per-browser.
+(Charge start/stop/limit no longer live here at all — see [Things the bridge
+does not report back](#things-the-bridge-does-not-report-back) — they're read
+live from the car/bridge instead of cached in this blob.) Settings that
+describe the *viewer* instead — theme, distance/temperature units, the app
+lock's PIN or biometric enrolment — stay in that browser's own `localStorage`,
+since there is no single correct answer for those across a household (and a
+shared PIN would defeat the point of a *local* presence check).
+
+Push subscriptions (see ["Notify when charging finishes"](#what-it-does)
+above) are the one field here that is per-device data living in a shared blob
+rather than a household-wide preference: each phone's endpoint is unique to
+that phone, but *the list of who to notify* still has to be shared so
+`deploy/charge_notify.py` — which has no browser of its own — can read it.
 
 This is the one place the PWA is no longer purely static: a small sidecar,
 `deploy/settings_store.py`, holds the shared settings as one JSON file and is

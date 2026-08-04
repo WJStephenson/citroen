@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { MIN_POLL_MINUTES, getPollMinutes, getVin, setPollMinutes, setVin } from '../config'
 import { useSheetDismiss } from '../hooks/useSheetDismiss'
 import { useTariff } from '../hooks/useTariff'
@@ -7,6 +7,7 @@ import { useUnits } from '../hooks/useUnits'
 import { setTariff } from '../tariff'
 import { setTheme } from '../theme'
 import { setUnits } from '../units'
+import { currentSubscription, isPushSupported, subscribeToPush, unsubscribeFromPush } from '../push'
 import {
   clearLock,
   configuredMethod,
@@ -26,6 +27,12 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  // Whether *this* browser holds a live push subscription — checked async
+  // against the service worker registration, unlike everything else on this
+  // sheet, which reads a synchronous snapshot. Starts 'unknown' rather than
+  // false so the switch does not flash "off" before that check resolves.
+  const [pushState, setPushState] = useState<'unknown' | 'on' | 'off'>('unknown')
+  const [pushBusy, setPushBusy] = useState(false)
   // Units, theme and the tariff are applied immediately rather than on Save —
   // the change is visible behind the sheet, so waiting for a reload would feel
   // broken. Only the VIN and the poll interval need the reload Save does.
@@ -33,6 +40,37 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const theme = useTheme()
   const tariff = useTariff()
   const sheet = useSheetDismiss(onClose)
+
+  useEffect(() => {
+    if (!isPushSupported()) {
+      setPushState('off')
+      return
+    }
+    void currentSubscription().then((sub) => setPushState(sub ? 'on' : 'off'))
+  }, [])
+
+  const togglePush = async () => {
+    setPushBusy(true)
+    try {
+      if (pushState === 'on') {
+        await unsubscribeFromPush()
+        setPushState('off')
+        setNotice('Charge-finished notifications turned off on this device.')
+      } else {
+        const granted = await subscribeToPush()
+        setPushState(granted ? 'on' : 'off')
+        setNotice(
+          granted
+            ? 'This device will get a notification when charging finishes.'
+            : 'Notification permission was denied — allow it in the browser/OS settings to turn this on.',
+        )
+      }
+    } catch {
+      setNotice('Could not reach the push service. Try again in a moment.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
 
   const save = () => {
     setVin(vin)
@@ -119,6 +157,27 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
         <p className="note">
           Polling below {MIN_POLL_MINUTES} minutes keeps the car's ECUs awake and flattens the 12V
           battery. Pull down on the dashboard whenever you want live state.
+        </p>
+
+        <h3>Notifications</h3>
+        <div className="unit-row">
+          <span>Notify when charging finishes</span>
+          <button
+            type="button"
+            className={`switch ${pushState === 'on' ? 'is-on' : ''}`}
+            role="switch"
+            aria-checked={pushState === 'on'}
+            aria-label="Notify this device when charging finishes"
+            onClick={() => void togglePush()}
+            disabled={pushBusy || pushState === 'unknown' || !isPushSupported()}
+          >
+            <span className="switch-thumb" />
+          </button>
+        </div>
+        <p className="note">
+          {isPushSupported()
+            ? "Runs server-side, independent of this app being open — it'll arrive even if the phone is asleep. Reaches the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."
+            : 'Push notifications need a browser with service worker + push support, installed as an app rather than a plain browser tab on some platforms (notably iOS: Add to Home Screen first).'}
         </p>
 
         <h3>Electricity</h3>

@@ -19,3 +19,7 @@ __pycache__/
 # volume docker-compose.settings.yml mounts if run from inside this repo.
 settings-data/
 deploy/settings_data/
+
+# charge_notify's session-notified state, if docker-compose.notify.yml is run
+# from inside this repo.
+deploy/notify_data/

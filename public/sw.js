@@ -142,3 +142,53 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(request, SHELL_CACHE, { revalidate: true }))
   }
 })
+
+/**
+ * "Charging finished" notifications. The push itself is sent by
+ * deploy/charge-notify/watcher.py, which polls the bridge independently of
+ * any tab being open — this handler only has to render whatever payload it
+ * sent. A malformed or empty payload still has to produce a notification:
+ * Chrome revokes the push permission for a site that gets a push and shows
+ * nothing for it ("silent push").
+ */
+self.addEventListener('push', (event) => {
+  let payload = {}
+  try {
+    if (event.data) payload = event.data.json()
+  } catch {
+    // Non-JSON payload: fall through to the fallback text below.
+  }
+
+  const title = payload.title || 'Charging update'
+  const options = {
+    body: payload.body || 'The car has something new to report.',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: payload.tag || 'charge-status',
+    // A later push about the same session replaces the earlier one on
+    // screen rather than stacking — see `tag` above — but should still
+    // re-alert, since the ones that matter (finished charging) are rare
+    // and easy to miss silently.
+    renotify: true,
+    data: { url: payload.url || '/' },
+  }
+
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+/** Focuses an already-open tab instead of opening a second one. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = event.notification.data?.url || '/'
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const existing = clients.find((client) => new URL(client.url).origin === self.location.origin)
+      if (existing) {
+        await existing.focus()
+        return
+      }
+      await self.clients.openWindow(targetUrl)
+    })(),
+  )
+})

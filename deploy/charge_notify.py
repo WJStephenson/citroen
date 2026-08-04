@@ -61,6 +61,15 @@ VAPID_PRIVATE_KEY = os.environ["VAPID_PRIVATE_KEY"]
 VAPID_SUBJECT = os.environ["VAPID_SUBJECT"]
 
 REQUEST_TIMEOUT_S = 30
+# How long the push service may hold the notification for a phone it cannot
+# reach right now. pywebpush defaults this to 0, which means "deliver this
+# instant or discard" — the push service still answers 201, it just throws
+# the message away. That default is precisely wrong here: an Android phone
+# with its screen off is in Doze and unreachable, and a charge finishing
+# overnight is the case this whole service exists for. A day is long enough
+# to survive a night asleep, and a "charging finished" older than that has
+# stopped being news anyway.
+PUSH_TTL_SECONDS = 86_400
 # A poll landing mid-charge with a slightly noisy reading should not look
 # like a new session. A real new session starts from disconnected or from
 # whatever level the last one left off well below target, so this only
@@ -144,6 +153,7 @@ def send_push(subscription: dict, payload: dict) -> bool:
             data=json.dumps(payload),
             vapid_private_key=VAPID_PRIVATE_KEY,
             vapid_claims={"sub": VAPID_SUBJECT},
+            ttl=PUSH_TTL_SECONDS,
         )
         return True
     except WebPushException as ex:

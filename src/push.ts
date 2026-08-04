@@ -16,11 +16,59 @@
 import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from './api/sharedSettings'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY ?? ''
+/** How long to wait for a service worker to report itself active before giving up and saying so. */
+const SW_READY_TIMEOUT_MS = 8_000
 
 export const PUSH_SUBSCRIPTIONS_CHANGED = SHARED_SETTINGS_CHANGED
 
+export type PushUnavailableReason =
+  | 'insecure-context'
+  | 'no-service-worker-api'
+  | 'no-push-manager'
+  | 'no-vapid-key'
+  | 'no-registration'
+  | 'not-activating'
+
+/**
+ * Distinguishes *why* push is unavailable, rather than a single boolean —
+ * "the switch is grey" was reported once with no way to tell, from outside
+ * a debugger, whether that meant an unsupported browser, a missing build-time
+ * key, or a service worker that registered but never reached "active" (the
+ * one case a plain feature-detect can't see: register() succeeding is not
+ * activating, and a worker stuck installing looks identical to "supported").
+ */
+export async function pushUnavailableReason(): Promise<PushUnavailableReason | null> {
+  if (!window.isSecureContext) return 'insecure-context'
+  if (!('serviceWorker' in navigator)) return 'no-service-worker-api'
+  if (!('PushManager' in window)) return 'no-push-manager'
+  if (VAPID_PUBLIC_KEY === '') return 'no-vapid-key'
+
+  const registration = await navigator.serviceWorker.getRegistration('/')
+  if (!registration) return 'no-registration'
+
+  const ready = await Promise.race([
+    navigator.serviceWorker.ready.then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), SW_READY_TIMEOUT_MS)),
+  ])
+  return ready ? null : 'not-activating'
+}
+
+export const PUSH_UNAVAILABLE_MESSAGES: Record<PushUnavailableReason, string> = {
+  'insecure-context':
+    'This page was opened over plain HTTP. Notifications need HTTPS — reopen it from the usual https:// link.',
+  'no-service-worker-api': "This browser doesn't support service workers, so push notifications can't work here.",
+  'no-push-manager':
+    "This browser doesn't support Web Push. On iOS, Add to Home Screen first — Safari only allows push from an installed app, not a browser tab.",
+  'no-vapid-key':
+    'This build has no VAPID key configured — deploy/charge_notify.py needs setting up server-side, and VITE_VAPID_PUBLIC_KEY needs to be in the build that produced this app. See deploy/DEPLOYMENT.md §2c.',
+  'no-registration':
+    "The app's service worker never registered. Try closing the app fully and reopening it; if that doesn't help, reinstalling it (remove from home screen, Add to Home Screen again) usually clears it.",
+  'not-activating':
+    "The service worker registered but never finished activating. Force-close the app, reopen it, and check for a chrome://serviceworker-internals entry for this site if it happens again — that's not something reopening the app alone can usually fix.",
+}
+
 export function isPushSupported(): boolean {
-  return 'serviceWorker' in navigator && 'PushManager' in window && VAPID_PUBLIC_KEY !== ''
+  return VAPID_PUBLIC_KEY !== '' && 'serviceWorker' in navigator && 'PushManager' in window
 }
 
 /** The one non-boilerplate step in subscribing: the key has to be bytes, not base64url text. */
@@ -51,10 +99,20 @@ function storedSubscriptions(): StoredSubscription[] {
   return Array.isArray(raw) ? raw.filter(isStoredSubscription) : []
 }
 
-/** This browser's live subscription, if it has one — independent of what's in the shared list. */
+/**
+ * This browser's live subscription, if it has one — independent of what's
+ * in the shared list. Null on a service worker that never activates, same
+ * as "no subscription", rather than hanging forever on `.ready` — the
+ * caller cannot tell those apart from here, but pushUnavailableReason() can,
+ * and is what the Settings sheet uses to explain a stuck switch.
+ */
 export async function currentSubscription(): Promise<PushSubscription | null> {
   if (!isPushSupported()) return null
-  const registration = await navigator.serviceWorker.ready
+  const registration = await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), SW_READY_TIMEOUT_MS)),
+  ])
+  if (!registration) return null
   return registration.pushManager.getSubscription()
 }
 

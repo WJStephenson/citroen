@@ -7,7 +7,14 @@ import { useUnits } from '../hooks/useUnits'
 import { setTariff } from '../tariff'
 import { setTheme } from '../theme'
 import { setUnits } from '../units'
-import { currentSubscription, isPushSupported, subscribeToPush, unsubscribeFromPush } from '../push'
+import {
+  PUSH_UNAVAILABLE_MESSAGES,
+  currentSubscription,
+  pushUnavailableReason,
+  subscribeToPush,
+  unsubscribeFromPush,
+  type PushUnavailableReason,
+} from '../push'
 import {
   clearLock,
   configuredMethod,
@@ -33,6 +40,11 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   // false so the switch does not flash "off" before that check resolves.
   const [pushState, setPushState] = useState<'unknown' | 'on' | 'off'>('unknown')
   const [pushBusy, setPushBusy] = useState(false)
+  // Set only when the switch is stuck off for a reason worth explaining —
+  // an unsupported browser, a build with no VAPID key, or (the one a plain
+  // feature-detect can't catch) a service worker that registered but never
+  // finished activating. Null means "no known reason", not "definitely fine".
+  const [pushProblem, setPushProblem] = useState<PushUnavailableReason | null>(null)
   // Units, theme and the tariff are applied immediately rather than on Save —
   // the change is visible behind the sheet, so waiting for a reload would feel
   // broken. Only the VIN and the poll interval need the reload Save does.
@@ -42,11 +54,21 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const sheet = useSheetDismiss(onClose)
 
   useEffect(() => {
-    if (!isPushSupported()) {
-      setPushState('off')
-      return
+    let cancelled = false
+    void pushUnavailableReason().then((reason) => {
+      if (cancelled) return
+      setPushProblem(reason)
+      if (reason) {
+        setPushState('off')
+        return
+      }
+      void currentSubscription().then((sub) => {
+        if (!cancelled) setPushState(sub ? 'on' : 'off')
+      })
+    })
+    return () => {
+      cancelled = true
     }
-    void currentSubscription().then((sub) => setPushState(sub ? 'on' : 'off'))
   }, [])
 
   const togglePush = async () => {
@@ -169,15 +191,15 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
             aria-checked={pushState === 'on'}
             aria-label="Notify this device when charging finishes"
             onClick={() => void togglePush()}
-            disabled={pushBusy || pushState === 'unknown' || !isPushSupported()}
+            disabled={pushBusy || pushState === 'unknown' || pushProblem !== null}
           >
             <span className="switch-thumb" />
           </button>
         </div>
         <p className="note">
-          {isPushSupported()
-            ? "Runs server-side, independent of this app being open — it'll arrive even if the phone is asleep. Reaches the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."
-            : 'Push notifications need a browser with service worker + push support, installed as an app rather than a plain browser tab on some platforms (notably iOS: Add to Home Screen first).'}
+          {pushProblem
+            ? PUSH_UNAVAILABLE_MESSAGES[pushProblem]
+            : "Runs server-side, independent of this app being open — it'll arrive even if the phone is asleep. Reaches the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."}
         </p>
 
         <h3>Electricity</h3>

@@ -14,6 +14,7 @@
  */
 
 import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from './api/sharedSettings'
+import { serviceWorkerRegistrationError } from './sw-register'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY ?? ''
 /** How long to wait for a service worker to report itself active before giving up and saying so. */
@@ -53,7 +54,7 @@ export async function pushUnavailableReason(): Promise<PushUnavailableReason | n
   return ready ? null : 'not-activating'
 }
 
-export const PUSH_UNAVAILABLE_MESSAGES: Record<PushUnavailableReason, string> = {
+const BASE_MESSAGES: Record<PushUnavailableReason, string> = {
   'insecure-context':
     'This page was opened over plain HTTP. Notifications need HTTPS — reopen it from the usual https:// link.',
   'no-service-worker-api': "This browser doesn't support service workers, so push notifications can't work here.",
@@ -62,9 +63,22 @@ export const PUSH_UNAVAILABLE_MESSAGES: Record<PushUnavailableReason, string> = 
   'no-vapid-key':
     'This build has no VAPID key configured — deploy/charge_notify.py needs setting up server-side, and VITE_VAPID_PUBLIC_KEY needs to be in the build that produced this app. See deploy/DEPLOYMENT.md §2c.',
   'no-registration':
-    "The app's service worker never registered. Try closing the app fully and reopening it; if that doesn't help, reinstalling it (remove from home screen, Add to Home Screen again) usually clears it.",
+    "The app's service worker isn't registered yet. Close the app fully and reopen it — if this persists after that, the registration is failing rather than racing.",
   'not-activating':
     "The service worker registered but never finished activating. Force-close the app, reopen it, and check for a chrome://serviceworker-internals entry for this site if it happens again — that's not something reopening the app alone can usually fix.",
+}
+
+/**
+ * The reason, plus the underlying registration error when there is one —
+ * "never registered" is the symptom, and the browser's own message about
+ * *why* is the only thing that distinguishes a fetch/MIME/scope failure
+ * from a worker that simply hasn't been given a chance to register yet.
+ */
+export function pushUnavailableMessage(reason: PushUnavailableReason): string {
+  const base = BASE_MESSAGES[reason]
+  if (reason !== 'no-registration') return base
+  const detail = serviceWorkerRegistrationError()
+  return detail ? `${base} The browser reported: ${detail}` : base
 }
 
 export function isPushSupported(): boolean {

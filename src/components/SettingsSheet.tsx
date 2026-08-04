@@ -8,7 +8,7 @@ import { setTariff } from '../tariff'
 import { setTheme } from '../theme'
 import { setUnits } from '../units'
 import {
-  PUSH_UNAVAILABLE_MESSAGES,
+  pushUnavailableMessage,
   currentSubscription,
   pushUnavailableReason,
   subscribeToPush,
@@ -198,7 +198,7 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
         </div>
         <p className="note">
           {pushProblem
-            ? PUSH_UNAVAILABLE_MESSAGES[pushProblem]
+            ? pushUnavailableMessage(pushProblem)
             : "Runs server-side, independent of this app being open — it'll arrive even if the phone is asleep. Reaches the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."}
         </p>
 

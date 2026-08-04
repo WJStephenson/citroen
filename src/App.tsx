@@ -126,7 +126,7 @@ export default function App() {
         {
           id: 'chargeLimit',
           label: 'Charge limit',
-          node: <ChargeLimitWidget commands={commands} />,
+          node: <ChargeLimitWidget commands={commands} state={state} />,
         },
         ...(isPlausibleAuxVoltage(state.auxVoltage)
           ? [{ id: 'aux', label: '12V battery', node: <AuxWidget volts={state.auxVoltage} /> }]
@@ -135,7 +135,7 @@ export default function App() {
           id: 'chargeWindow',
           label: 'Charging window',
           span: 2,
-          node: <ChargeWindowWidget commands={commands} />,
+          node: <ChargeWindowWidget commands={commands} state={state} />,
         },
         { id: 'history', label: 'Charging history', span: 2, node: <ChargingHistoryWidget /> },
       ]

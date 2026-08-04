@@ -20,6 +20,7 @@ import {
   type ChargingStatus,
   type CommandResult,
   type PreconditioningStatus,
+  type RawChargeControl,
   type RawChargingSession,
   type RawVehicleInfo,
   type VehicleLocation,
@@ -52,6 +53,12 @@ export const endpoints = {
    */
   chargeStop: (vin: string, hour: number, minute: number) =>
     `/charge_control?vin=${encodeURIComponent(vin)}&hour=${hour}&minute=${minute}`,
+  /**
+   * Same URL with no hour/minute/percentage — get_charge_control only
+   * mutates when those are present, so this reads PSACC's current
+   * stop-hour/threshold for this VIN without changing anything.
+   */
+  chargeControlState: (vin: string) => `/charge_control?vin=${encodeURIComponent(vin)}`,
   /**
    * Charge type: immediate (1) or delayed (0). Immediate is how a deferred
    * start is cancelled — the car keeps the stored hour but stops honouring it.
@@ -157,6 +164,60 @@ function num(value: unknown): number | null {
 }
 
 /**
+ * `next_delayed_time` is a full RFC3339 timestamp (the next absolute moment
+ * the car will start charging), not a plain hour — it can be tomorrow's date
+ * if today's target already passed. The UI only ever shows a time-of-day, so
+ * this collapses it to local HH:MM the same way the hour/minute inputs work.
+ */
+function hhmmLocal(value: string | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+/** [hour, minute] -> local HH:MM, the same shape the charge widgets edit. */
+function hhmmFromPair(pair: [number, number] | null | undefined): string | null {
+  if (!pair) return null
+  const [h, m] = pair
+  if (typeof h !== 'number' || typeof m !== 'number') return null
+  if (h === 0 && m === 0) return null // ChargeControl's own "disabled" sentinel
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+interface ChargeControlState {
+  configured: boolean
+  stopHour: string | null
+  percentageThreshold: number | null
+}
+
+const UNCONFIGURED: ChargeControlState = { configured: false, stopHour: null, percentageThreshold: null }
+
+/**
+ * Reads PSACC's local charge-control config for this VIN without changing
+ * it (see endpoints.chargeControlState). Never touches the car, so this is
+ * safe to call on every poll regardless of the 12V-drain concerns that keep
+ * get_vehicleinfo polling slow.
+ *
+ * "Not configured" is a normal, expected state (see ChargeLimitWidget /
+ * ChargeWindowWidget) — the bridge reports it as `{error: "VIN not in
+ * list"}` with an HTTP 200, which is handled here as data, not a failure.
+ * A genuine fetch failure (network/timeout/auth) is left to propagate:
+ * fetchVehicleState below lets it fail the whole poll rather than risk
+ * mislabelling "the bridge didn't answer" as "charge control is off".
+ */
+export async function fetchChargeControlState(): Promise<ChargeControlState> {
+  const vin = requireVin()
+  const raw = await request<RawChargeControl>(endpoints.chargeControlState(vin), READ_TIMEOUT_MS)
+  if (raw.error) return UNCONFIGURED
+  return {
+    configured: true,
+    stopHour: hhmmFromPair(raw._stop_hour ?? null),
+    percentageThreshold: num(raw.percentage_threshold),
+  }
+}
+
+/**
  * GeoJSON orders coordinates [lon, lat, altitude?] — easy to transpose by
  * accident, so this is the one place that reads them.
  */
@@ -191,20 +252,38 @@ export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
     auxVoltage: num(raw.battery?.voltage),
     location: parseLocation(raw),
     reportedAt: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
+    chargeStartHour: hhmmLocal(charging?.next_delayed_time),
+    // Filled in by fetchVehicleState from the separate /charge_control read —
+    // get_vehicleinfo has no opinion on either.
+    chargeStopHour: null,
+    chargeLimitPercent: null,
+    chargeControlConfigured: false,
   }
 }
 
 /**
  * `fromCache` reads psa_car_controller's stored state instead of waking the
  * car. Background polling passes true; pull-to-refresh passes false.
+ *
+ * Charge-control state is fetched alongside it every time, cache flag or
+ * not — it's a local bridge read (see fetchChargeControlState), not a call
+ * to the car, so it carries none of the wake-up cost that flag exists to
+ * avoid. Both requests are awaited together: a failure in either fails the
+ * whole poll rather than risk half-updating the UI with one true reading and
+ * one stale one.
  */
 export async function fetchVehicleState(fromCache = false): Promise<VehicleState> {
   const vin = requireVin()
-  const raw = await request<RawVehicleInfo>(
-    endpoints.vehicleInfo(vin, fromCache),
-    READ_TIMEOUT_MS,
-  )
-  return normalise(raw, vin)
+  const [raw, chargeControl] = await Promise.all([
+    request<RawVehicleInfo>(endpoints.vehicleInfo(vin, fromCache), READ_TIMEOUT_MS),
+    fetchChargeControlState(),
+  ])
+  return {
+    ...normalise(raw, vin),
+    chargeStopHour: chargeControl.stopHour,
+    chargeLimitPercent: chargeControl.percentageThreshold,
+    chargeControlConfigured: chargeControl.configured,
+  }
 }
 
 /**

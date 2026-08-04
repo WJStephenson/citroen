@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { setChargeLimit } from '../api/client'
-import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from '../api/sharedSettings'
+import type { VehicleState } from '../api/types'
 import type { Commands } from '../hooks/useCommands'
 import { LimitIcon } from './Icons'
 import { Widget, WidgetNote } from './Widget'
@@ -26,11 +26,6 @@ const KEY_SETTLE_MS = 700
 const snap = (value: number) =>
   Math.min(MAX, Math.max(MIN, Math.round(value / STEP) * STEP))
 
-function stored(): number | null {
-  const value = getSharedSettings().chargeLimitHint
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
-}
-
 /**
  * The maximum the car will charge to, set by swiping the tile up and down.
  *
@@ -42,34 +37,31 @@ function stored(): number | null {
  * pointer until the finger has actually travelled — hold still and the tile
  * gets picked up for rearranging instead.
  *
- * get_vehicleinfo does not report the configured threshold back, so the last
- * value *any* device successfully set is remembered and shown as current. It
- * is a display hint, not authoritative state — and it is shared across every
- * device controlling this car (see api/sharedSettings.ts), since the limit
- * describes the car, not the phone that last touched it.
+ * `get_vehicleinfo` does not report the configured threshold, but PSACC's own
+ * /charge_control does when read without mutating params — see
+ * fetchChargeControlState in api/client.ts. state.chargeLimitPercent is that
+ * live reading, not a locally remembered "last value any device sent"; if
+ * PSACC's config was ever reset (a re-auth after a connectivity outage does
+ * this — see the app_decoder patch in docker-compose.yml) this tile now shows
+ * that honestly instead of continuing to display a stale number nobody's car
+ * is actually holding.
  */
-export function ChargeLimitWidget({ commands }: { commands: Commands }) {
-  const [saved, setSaved] = useState<number | null>(stored)
-  const [value, setValue] = useState(() => stored() ?? DEFAULT)
+export function ChargeLimitWidget({ commands, state }: { commands: Commands; state: VehicleState }) {
+  const saved = state.chargeControlConfigured ? state.chargeLimitPercent : null
+  const [value, setValue] = useState(() => saved ?? DEFAULT)
   const [dragging, setDragging] = useState(false)
   const [settling, setSettling] = useState(false)
   const gesture = useRef<{ pointerId: number; startY: number; from: number; live: boolean } | null>(null)
   const savedRef = useRef(saved)
-  savedRef.current = saved
 
-  // Another device setting the limit lands here without a reload. Only
-  // nudges the pending value if it still matched the old saved one — a
-  // swipe already in progress locally is never clobbered.
+  // A poll can land the car's real value under this tile at any time. Only
+  // nudge the pending value if it still matched the old known one — a swipe
+  // already in progress locally is never clobbered.
   useEffect(() => {
-    const onChange = () => {
-      const next = stored()
-      if (next === savedRef.current) return
-      setValue((draft) => (draft === savedRef.current ? (next ?? DEFAULT) : draft))
-      setSaved(next)
-    }
-    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
-    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
-  }, [])
+    if (saved === savedRef.current) return
+    setValue((draft) => (draft === savedRef.current ? (saved ?? DEFAULT) : draft))
+    savedRef.current = saved
+  }, [saved])
 
   const busy = commands.active?.kind === 'chargeLimit'
   const blocked = Boolean(commands.active)
@@ -79,12 +71,8 @@ export function ChargeLimitWidget({ commands }: { commands: Commands }) {
     void commands.run({
       kind: 'chargeLimit',
       label: `Setting charge limit to ${next}%`,
-      send: async () => {
-        const result = await setChargeLimit(next)
-        patchSharedSettings({ chargeLimitHint: next })
-        setSaved(next)
-        return result
-      },
+      optimistic: { chargeLimitPercent: next, chargeControlConfigured: true },
+      send: () => setChargeLimit(next),
     })
   }
 
@@ -154,9 +142,11 @@ export function ChargeLimitWidget({ commands }: { commands: Commands }) {
   const pending = dragging || settling
   const note = pending
     ? `Release to set ${value}%`
-    : saved === null
-      ? 'Swipe up or down to change'
-      : `Set to ${saved}%`
+    : !state.chargeControlConfigured
+      ? "Not set up in PSACC — won't take effect until it is"
+      : saved === null
+        ? 'Swipe up or down to change'
+        : `Set to ${saved}%`
 
   return (
     <Widget

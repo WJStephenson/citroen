@@ -42,6 +42,21 @@ export interface RawVehicleInfo {
   service_type?: string
 }
 
+/**
+ * `GET /charge_control?vin=` with no hour/minute/percentage params is
+ * read-only — see get_charge_control in psa_car_controller/web/view/api.py,
+ * which only mutates when those params are present and always returns the
+ * ChargeControl dict either way. This is that dict.
+ *
+ * "VIN not in list" comes back as `{error: "..."}` (HTTP 200) when charge
+ * control was never set up for this VIN — not a fetch failure.
+ */
+export interface RawChargeControl {
+  _stop_hour?: [number, number] | null
+  percentage_threshold?: number
+  error?: string
+}
+
 export type ChargingStatus =
   | 'charging'
   | 'plugged-idle'
@@ -74,6 +89,27 @@ export interface VehicleState {
   location: VehicleLocation | null
   /** When the *car* last reported, not when we last polled. */
   reportedAt: Date | null
+  /**
+   * HH:MM the car itself currently holds as its delayed-charge start, read
+   * from `next_delayed_time` — not what any device last asked for. Null if
+   * the car reports no delayed-charge time at all.
+   */
+  chargeStartHour: string | null
+  /**
+   * HH:MM PSACC will cut the charge at, read back from its own
+   * /charge_control config — null if no stop hour is set, which is
+   * indistinguishable from "not configured" without chargeControlConfigured.
+   */
+  chargeStopHour: string | null
+  /** The percentage PSACC will stop the charge at, read back the same way. */
+  chargeLimitPercent: number | null
+  /**
+   * Whether PSACC's charge_control is set up for this VIN at all. When false,
+   * chargeStopHour/chargeLimitPercent are meaningless (nothing to read), and
+   * setting either will fail with "VIN not in list" — see command() in
+   * client.ts.
+   */
+  chargeControlConfigured: boolean
 }
 
 export interface VehicleLocation {

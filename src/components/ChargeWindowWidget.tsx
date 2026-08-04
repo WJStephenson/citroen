@@ -5,17 +5,12 @@ import {
   setChargeStartHour,
   setChargeStopHour,
 } from '../api/client'
-import { SHARED_SETTINGS_CHANGED, getSharedSettings, patchSharedSettings } from '../api/sharedSettings'
 import type { Commands } from '../hooks/useCommands'
+import type { VehicleState } from '../api/types'
 import { BoltIcon, CheckIcon, ClockIcon } from './Icons'
 import { Widget } from './Widget'
 
 const DAY = 1440
-
-function readHint(key: 'chargeStartHint' | 'chargeStopHint'): string | null {
-  const raw = getSharedSettings()[key]
-  return typeof raw === 'string' ? raw : null
-}
 
 /*
  * Dial geometry, in the 100×100 viewBox the ring is drawn in. A charging window
@@ -46,42 +41,45 @@ const STUB = 15
  *     whether it charges immediately or waits, so clearing means switching to
  *     immediate charging.
  *
+ * What the dial and headline show is read back from the car/bridge —
+ * state.chargeStartHour from the car's own next_delayed_time, chargeStopHour
+ * from PSACC's /charge_control — not "what we last asked for". A stored
+ * setting can be silently lost (an OTP re-auth after a connectivity outage
+ * once wiped PSACC's stop hour without touching the car's own start hour;
+ * see the app_decoder patch in docker-compose.yml) and this tile has to say
+ * so, not keep repeating the last command back as if it were still in
+ * effect. Right after a command the optimistic value shows immediately, and
+ * the live refresh useCommands.run schedules a few seconds later corrects it
+ * if the car didn't actually take it.
+ *
  * The tile is in three bands, top to bottom: what the window *is* (the dial and
  * its headline), what it is *set to* (the two editable rows), and the two
  * overrides that throw it away. Only the middle band is a form, and it is the
  * only part drawn on a raised panel — so the reading above it is a reading, not
  * the first field of one.
  */
-export function ChargeWindowWidget({ commands }: { commands: Commands }) {
-  const [start, setStart] = useState(() => readHint('chargeStartHint') ?? '00:30')
-  const [stop, setStop] = useState(() => readHint('chargeStopHint') ?? '07:00')
-  const [savedStart, setSavedStart] = useState(() => readHint('chargeStartHint'))
-  const [savedStop, setSavedStop] = useState(() => readHint('chargeStopHint'))
+export function ChargeWindowWidget({ commands, state }: { commands: Commands; state: VehicleState }) {
+  const [start, setStart] = useState(() => state.chargeStartHour ?? '00:30')
+  const [stop, setStop] = useState(() => state.chargeStopHour ?? '07:00')
 
-  // Another device setting or clearing a time lands here without a reload.
-  // Only nudges the editable field if it still matched the old saved value —
-  // an in-progress local edit is never clobbered by a change made elsewhere.
-  const savedStartRef = useRef(savedStart)
-  savedStartRef.current = savedStart
-  const savedStopRef = useRef(savedStop)
-  savedStopRef.current = savedStop
+  // A poll can land the car's real value under this tile at any time. Only
+  // nudge the editable field if it still matched the old known value — an
+  // in-progress local edit is never clobbered by a poll landing mid-edit.
+  const knownStartRef = useRef(state.chargeStartHour)
+  const knownStopRef = useRef(state.chargeStopHour)
 
   useEffect(() => {
-    const onChange = () => {
-      const nextStart = readHint('chargeStartHint')
-      if (nextStart !== savedStartRef.current) {
-        setStart((draft) => (draft === savedStartRef.current ? (nextStart ?? '00:30') : draft))
-        setSavedStart(nextStart)
-      }
-      const nextStop = readHint('chargeStopHint')
-      if (nextStop !== savedStopRef.current) {
-        setStop((draft) => (draft === savedStopRef.current ? (nextStop ?? '07:00') : draft))
-        setSavedStop(nextStop)
-      }
+    const nextStart = state.chargeStartHour
+    if (nextStart !== knownStartRef.current) {
+      setStart((draft) => (draft === knownStartRef.current ? (nextStart ?? '00:30') : draft))
+      knownStartRef.current = nextStart
     }
-    window.addEventListener(SHARED_SETTINGS_CHANGED, onChange)
-    return () => window.removeEventListener(SHARED_SETTINGS_CHANGED, onChange)
-  }, [])
+    const nextStop = state.chargeStopHour
+    if (nextStop !== knownStopRef.current) {
+      setStop((draft) => (draft === knownStopRef.current ? (nextStop ?? '07:00') : draft))
+      knownStopRef.current = nextStop
+    }
+  }, [state.chargeStartHour, state.chargeStopHour])
 
   /*
    * The dial carries a marker for the present, which is what makes "is the
@@ -117,12 +115,8 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
     void commands.run({
       kind: 'chargeStart',
       label: `Setting charge start to ${start}`,
-      send: async () => {
-        const result = await setChargeStartHour(parsed[0], parsed[1])
-        patchSharedSettings({ chargeStartHint: start })
-        setSavedStart(start)
-        return result
-      },
+      optimistic: { chargeStartHour: start },
+      send: () => setChargeStartHour(parsed[0], parsed[1]),
     })
   }
 
@@ -132,44 +126,32 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
     void commands.run({
       kind: 'chargeStop',
       label: stopIsMidnight ? 'Clearing stop time' : `Setting charge stop to ${stop}`,
-      send: async () => {
-        const result = await setChargeStopHour(parsed[0], parsed[1])
-        if (stopIsMidnight) {
-          patchSharedSettings({ chargeStopHint: null })
-          setSavedStop(null)
-        } else {
-          patchSharedSettings({ chargeStopHint: stop })
-          setSavedStop(stop)
-        }
-        return result
-      },
+      optimistic: { chargeStopHour: stopIsMidnight ? null : stop },
+      send: () => setChargeStopHour(parsed[0], parsed[1]),
     })
   }
 
+  // No optimistic chargeStartHour here: the car keeps holding whatever hour
+  // it had (that part of state.chargeStartHour stays true), what changes is
+  // only whether it honours it — which this tile has no live field for, so
+  // it is left to the outcome banner to say rather than guessed at here.
   const clearStart = () =>
     void commands.run({
       kind: 'chargeNow',
       label: 'Switching to immediate charging',
-      send: async () => {
-        const result = await clearChargeStartHour()
-        patchSharedSettings({ chargeStartHint: null })
-        setSavedStart(null)
-        return result
-      },
+      send: clearChargeStartHour,
     })
 
   const clearStop = () =>
     void commands.run({
       kind: 'chargeStop',
       label: 'Clearing stop time',
-      send: async () => {
-        const result = await clearChargeStopHour()
-        patchSharedSettings({ chargeStopHint: null })
-        setSavedStop(null)
-        return result
-      },
+      optimistic: { chargeStopHour: null },
+      send: clearChargeStopHour,
     })
 
+  const savedStart = state.chargeStartHour
+  const savedStop = state.chargeStopHour
   const startAt = toMinutes(savedStart)
   const stopAt = toMinutes(savedStop)
 
@@ -310,10 +292,20 @@ export function ChargeWindowWidget({ commands }: { commands: Commands }) {
           dirty={stop !== savedStop || stopIsMidnight}
           onApply={applyStop}
           applyLabel={stopIsMidnight ? 'Clear the stop time' : `Set the charge stop time to ${stop}`}
-          /* The 00:00 sentinel used to be signalled by the button quietly
-             relabelling itself to "Clear". Said out loud instead, because the
-             button is now a mark rather than a word. */
-          hint={stopIsMidnight ? '00:00 clears the stop time' : undefined}
+          hint={
+            // Charge control being unset is the exact failure this tile used
+            // to hide: PSACC forgets the stop hour on certain reconnects (see
+            // the app_decoder patch), and without this the row would just
+            // keep showing whatever was last typed in as if it still held.
+            !state.chargeControlConfigured
+              ? "Not set up in PSACC — this won't take effect until it is"
+              : // The 00:00 sentinel used to be signalled by the button quietly
+                // relabelling itself to "Clear". Said out loud instead, because
+                // the button is now a mark rather than a word.
+                stopIsMidnight
+                ? '00:00 clears the stop time'
+                : undefined
+          }
         />
       </div>
 

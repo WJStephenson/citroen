@@ -189,18 +189,35 @@ def poll_once(state: dict) -> dict:
     )
     if new_session:
         session["notified"] = False
+        session["seen_charging"] = False
 
-    reached = (
-        not session["notified"]
-        and level is not None
-        and level >= target
-        and (status in ACTIVE_STATUSES or status in DONE_STATUSES)
-    )
+    if status in ACTIVE_STATUSES:
+        session["seen_charging"] = True
+
+    # Two ways a session ends at its setpoint, and neither alone is enough:
+    #
+    #   - the car reports Finished. Definitive, but the level it reports at
+    #     that moment can be 99 rather than a clean 100, so a level check
+    #     alone would sit there waiting for a number that never arrives.
+    #   - the level reaches target. This is the only signal when PSACC's
+    #     charge control is what stops it: cutting the charge at a threshold
+    #     leaves the status Stopped, never Finished.
+    #
+    # Both are gated on having actually watched this session charge, so a
+    # watcher restart next to a car that finished hours ago doesn't announce
+    # it as news.
+    finished = status in DONE_STATUSES
+    hit_target = level is not None and level >= target
+    reached = not session["notified"] and session.get("seen_charging", False) and (finished or hit_target)
+
     if reached:
-        log(f"{vin} reached {level}% (target {target}%), notifying {len(subscriptions)} device(s)")
+        log(
+            f"{vin} finished at {level}% (target {target}%, status {status}), "
+            f"notifying {len(subscriptions)} device(s)"
+        )
         payload = {
             "title": "Charging finished" if target >= 100 else f"Charging reached {int(target)}%",
-            "body": f"Battery is at {int(level)}%.",
+            "body": f"Battery is at {int(level)}%." if level is not None else "Charging has finished.",
             "tag": "charge-status",
         }
         survivors = notify_all(subscriptions, payload)

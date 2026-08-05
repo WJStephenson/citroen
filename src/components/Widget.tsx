@@ -132,7 +132,11 @@ interface Props {
   icon: ReactNode
   label: string
   shape?: WidgetShape
-  /** A sustained state — pre-conditioning actually running, say. */
+  /**
+   * A sustained state — pre-conditioning actually running, say. Lights the
+   * tile's outline and breathes the inside, so a tile that is *doing something*
+   * is legible from across the grid without reading its words.
+   */
   active?: boolean
   /** This tile's own command is in flight — draws the travelling ring. */
   working?: boolean
@@ -221,31 +225,38 @@ export function Widget({
       )}
 
       {/*
-        A light travelling round the tile's own edge while its command is in
-        flight, drawn two ways because the tiles have two kinds of edge.
+        A light travelling round the tile's own edge, drawn two ways because the
+        tiles have two kinds of edge.
 
         A lobed tile already owns its outline as a path, so the ring is that
         same path stroked, and the light is a gap in its dash pattern running
         along it — a band of even width that follows every lobe. A box tile has
         no path, so there the ring is a mask cut from the element's own border,
         and the light is a conic gradient turning behind it.
+
+        Two speeds, saying two different things. A command in flight is a comet
+        hurrying round a dark edge: something is happening *now* and will stop.
+        A tile that is simply running lights its whole rim and lets one slow
+        highlight drift along it — a heartbeat, not a countdown. Work wins the
+        edge while it lasts, since it is the thing that is about to change.
       */}
-      {working &&
+      {(working || active) &&
         (SHAPES[shape] ? (
           <svg
-            className="widget-trace"
+            className={`widget-trace ${working ? 'is-working' : 'is-live'}`}
             viewBox="0 0 1 1"
             preserveAspectRatio="none"
             aria-hidden="true"
             focusable="false"
           >
+            {!working && <path className="widget-trace-rim" d={SHAPES[shape]} />}
             {/* pathLength normalises every shape to the same 100 units, so one
                 dash pattern gives the same-looking comet on all of them however
                 much outline the lobes actually add. */}
-            <path d={SHAPES[shape]} pathLength={100} />
+            <path className="widget-trace-light" d={SHAPES[shape]} pathLength={100} />
           </svg>
         ) : (
-          <span className="widget-ring" aria-hidden="true">
+          <span className={`widget-ring ${working ? 'is-working' : 'is-live'}`} aria-hidden="true">
             <span className="widget-ring-sweep" />
           </span>
         ))}

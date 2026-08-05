@@ -614,13 +614,20 @@ button {
   }
 }
 
-/* ---------- a command in flight: the travelling ring ---------- */
+/* ---------- the travelling ring: work in flight, and work running ---------- */
 
 /*
  * A light running round the edge of the tile whose command is on the wire. It
  * replaces the toast that used to say the same thing in the corner of the
  * screen: the tile you pressed is where you are already looking, and a mark on
  * it needs no words to say which command it belongs to.
+ *
+ * The same edge carries a second, slower state: a tile that is *running*
+ * something (the climate, once the car confirms it) keeps its rim lit with one
+ * highlight drifting round it. The two are deliberately far apart in tempo —
+ * a comet on a dark edge reads as "wait", a lit rim reads as "on" — because
+ * a tile can be both at once and the transition between them is the whole
+ * story of pressing it.
  *
  * The sweep is an oversized square carrying a conic gradient that simply turns,
  * and the ring is a mask on its parent. Rotating a real element rather than
@@ -682,10 +689,26 @@ button {
    * this wide. Doubled to land at the ~2px the box tiles carry.
    */
   stroke-width: 0.026;
-  /* Against pathLength=100 these are percentages of the outline: a fifth of the
-     way round, lit, chasing the rest of it. */
+}
+
+/* Against pathLength=100 these are percentages of the outline: a fifth of the
+   way round, lit, chasing the rest of it. */
+.widget-trace.is-working .widget-trace-light {
   stroke-dasharray: 20 80;
   animation: ring-trace 1.3s linear infinite;
+}
+
+/* The whole outline, held. Dimmer than the highlight so the two read as one
+   edge with a light on it rather than as two rings. */
+.widget-trace-rim {
+  stroke: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+/* A shorter light going round four times slower: unhurried enough to read as a
+   state, still plainly moving. */
+.widget-trace.is-live .widget-trace-light {
+  stroke-dasharray: 14 86;
+  animation: ring-trace 5.2s linear infinite;
 }
 
 @keyframes ring-trace {
@@ -720,6 +743,19 @@ button {
   to {
     rotate: 360deg;
   }
+}
+
+/*
+ * The box tile's version of the lit rim. The border is painted rather than left
+ * transparent, so the mask cuts a complete ring out of it and the sweep turning
+ * behind is a highlight travelling along an edge that is already there.
+ */
+.widget-ring.is-live {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.widget-ring.is-live .widget-ring-sweep {
+  animation-duration: 5.2s;
 }
 
 @keyframes ring-in {
@@ -1042,17 +1078,7 @@ button {
   stroke: var(--warn);
 }
 
-/* ---------- climate tile ---------- */
-
-/* The clover centres everything else in the tile; the switch has to be told,
-   because .switch pins itself to the start of the line for the settings sheet's
-   left-aligned rows. */
-.widget-precondition .switch {
-  align-self: center;
-  margin-top: 0.7rem;
-}
-
-/* ---------- action tiles: lights, horn ---------- */
+/* ---------- action tiles: lights, horn, climate ---------- */
 
 /*
  * The tile is the button. A transparent hit layer over the whole shape, rather
@@ -2593,6 +2619,14 @@ button {
    */
   .widget-ring-sweep {
     background: var(--accent);
+  }
+
+  /* Same on the lobed tiles, where the light is a dash rather than a gradient:
+     stopped, it is one arc parked wherever the animation was cut off, which
+     reads as a stray edge on the silhouette. Closing the dash makes it the
+     outline it is sitting on. */
+  .widget-trace-light {
+    stroke-dasharray: none;
   }
 
   /* Same problem on the confirm button: a stopped spinner is one arc of border

@@ -36,9 +36,15 @@ only — you already have the domain, tunnel, and nginx container.
   tiles about time (the window you schedule, the record of what happened), and
   mirrored diagonal corners for the counted numbers. Tiles holding a slider or a
   chart stay rectangular — a shaped tile has no corners to put them in.
-- **Pre-conditioning toggle** — with a non-blocking overlay that counts elapsed
-  seconds against the 30–90s cellular wake-up window, so a slow response reads
-  as normal rather than broken.
+- **Pre-conditioning** — tap the tile twice to start the climate, twice again to
+  stop it; while it is actually running the tile's outline stays lit with one
+  slow highlight travelling round it. Both directions ask twice because both
+  mistakes cost something: starting it drains a parked car, stopping it throws
+  away a warm cabin you cannot get back before you leave. A non-blocking overlay
+  counts elapsed seconds against the 30–90s cellular wake-up window, so a slow
+  response reads as normal rather than broken, and the tile holds what you asked
+  for until the car confirms it — see
+  [Pre-conditioning](#pre-conditioning-is-onoff-only).
 - **Charge limit** — swipe the tile up and down to set the maximum, 50–100% in
   5% steps, via PSACC's local charge control (needs it configured for your VIN —
   see below). Nothing is sent while the finger is moving; releasing commits it,
@@ -316,7 +322,19 @@ exposes them — they are read from PSACC's own stored config, so a program has 
 be set in psa_car_controller's UI, not from this app. Adding it would mean
 patching the bridge, not the PWA.
 
-Two behaviours worth knowing:
+Whether it is *running*, though, is reported: `preconditionning.air_conditioning
+.status` in the vehicle payload, mapped to on / off / finished / unknown in
+`api/client.ts`. So the tile shows what the car says, not what was last asked of
+it — which is why it can light its outline for a session someone started from
+another phone, and why it goes dark on its own when the car stops.
+
+The one exception is the few minutes after a command. The post-command refresh
+usually lands while the car is still waking, and the car honestly reports the
+*old* status — so the tile holds what was asked for over the reported value
+until the car agrees, or for four minutes, whichever comes first. Unbounded, a
+request the car quietly dropped would leave the tile lying about it forever.
+
+Two more behaviours worth knowing:
 
 - **`charge_control` is a local PSACC feature**, not a car command. It needs
   charge control configured in psa_car_controller for that VIN, otherwise it

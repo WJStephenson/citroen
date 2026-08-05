@@ -1,6 +1,8 @@
-import type { CSSProperties } from 'react'
-import type { ChargingStatus, VehicleState } from '../api/types'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { fetchTrips } from '../api/client'
+import type { ChargingStatus, Trip, VehicleState } from '../api/types'
 import { useUnits } from '../hooks/useUnits'
+import { distanceSince, startOfMonth, startOfWeek } from '../periods'
 import { formatDistance, isPlausibleAuxVoltage } from '../units'
 import { Widget, WidgetNote, WidgetValue } from './Widget'
 import { BatteryIcon, BoltIcon, OdometerIcon, PlugIcon, ThermometerIcon } from './Icons'
@@ -148,14 +150,92 @@ export function CabinWidget({ celsius }: { celsius: number | null }) {
 
 /* ---------- odometer ---------- */
 
+/*
+ * Three readings on one tile, cycled by tapping it: the total on the dash, then
+ * how far the car has gone this week and this month.
+ *
+ * The periods are calendar ones — Monday to Sunday, and the 1st to the end of
+ * the month — not the trailing 30 days. A rolling window answers "how much
+ * lately", which nobody asks; a calendar one answers "how am I doing against
+ * the month", which is the question a mileage limit or a fuel budget is
+ * actually posed in, and it is the only one where the same number means the
+ * same thing when you look again tomorrow.
+ *
+ * Both are period-to-date: the week's figure covers Monday to now, the month's
+ * the 1st to now.
+ */
+type OdometerView = 'total' | 'week' | 'month'
+
+const NEXT_VIEW: Record<OdometerView, OdometerView> = {
+  total: 'week',
+  week: 'month',
+  month: 'total',
+}
+
 export function OdometerWidget({ km }: { km: number | null }) {
   const units = useUnits()
-  const [value, unit] = formatDistance(km, units.distance).split(' ')
+  const [view, setView] = useState<OdometerView>('total')
+  const [trips, setTrips] = useState<Trip[] | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  /*
+   * Fetched on the first tap that needs it, not on mount. Every trip in the
+   * response carries its whole GPS track, so this is the largest read the app
+   * makes — and the tile opens on the total, which the vehicle payload already
+   * has. Nobody who never taps it should pay for it.
+   */
+  useEffect(() => {
+    if (view === 'total' || trips !== null || failed) return
+    let live = true
+    fetchTrips()
+      .then((loaded) => live && setTrips(loaded))
+      .catch(() => live && setFailed(true))
+    return () => {
+      live = false
+    }
+  }, [view, trips, failed])
+
+  const since =
+    view === 'week' ? startOfWeek(new Date()) : view === 'month' ? startOfMonth(new Date()) : null
+
+  const covered = trips === null || since === null ? null : distanceSince(trips, since)
+
+  const pending = view !== 'total' && trips === null && !failed
+  const [value, unit] = formatDistance(view === 'total' ? km : covered, units.distance).split(' ')
+
+  const note =
+    view === 'total'
+      ? 'Total distance'
+      : failed
+        ? 'No trip history'
+        : pending
+          ? 'Reading trips…'
+          : view === 'week'
+            ? 'Since Monday'
+            : `Since ${since?.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}`
 
   return (
-    <Widget icon={<OdometerIcon />} label="Odometer" className="widget-odometer">
-      <WidgetValue value={value} unit={unit} />
-      <WidgetNote>Total distance</WidgetNote>
+    <Widget
+      icon={<OdometerIcon />}
+      label="Odometer"
+      className="widget-odometer"
+      action={{
+        label: {
+          total: 'Show distance covered this week',
+          week: 'Show distance covered this month',
+          month: 'Show total distance',
+        }[view],
+        onPress: () => {
+          const next = NEXT_VIEW[view]
+          // A full lap back to the total is also the retry: a trip read that
+          // failed once should not leave the tile stuck on two dead views.
+          if (next === 'total') setFailed(false)
+          setView(next)
+        },
+      }}
+    >
+      <WidgetValue value={pending ? '…' : value} unit={pending ? undefined : unit} />
+      <WidgetNote>{note}</WidgetNote>
     </Widget>
   )
 }

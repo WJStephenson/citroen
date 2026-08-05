@@ -147,6 +147,34 @@ export interface ChargingSession {
   price: number | null
 }
 
+/**
+ * One trip from /vehicles/trips.
+ *
+ * The bridge sends far more than this per trip — consumption figures, an
+ * altitude delta, and a `positions` object holding the whole GPS track — but
+ * only the date and the distance are read here, so the rest is left undeclared
+ * rather than modelled and ignored.
+ */
+export interface RawTrip {
+  id?: number
+  /**
+   * Serialised by Flask's jsonify, which emits an RFC 1123 HTTP-date
+   * ("Wed, 05 Aug 2026 07:12:33 GMT") on Flask < 2.3 and ISO 8601 after it.
+   * `new Date` reads both, so nothing here has to know which is in front of it.
+   */
+  start_at?: string
+  /** Distance covered by this trip, km. */
+  distance?: number
+  /** The odometer at the end of the trip, km. */
+  mileage?: number
+}
+
+export interface Trip {
+  startedAt: Date | null
+  /** km */
+  distance: number | null
+}
+
 export type CommandKind =
   | 'precondition'
   | 'chargeLimit'

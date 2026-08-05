@@ -22,7 +22,9 @@ import {
   type PreconditioningStatus,
   type RawChargeControl,
   type RawChargingSession,
+  type RawTrip,
   type RawVehicleInfo,
+  type Trip,
   type VehicleLocation,
   type VehicleState,
 } from './types'
@@ -71,6 +73,7 @@ export const endpoints = {
   lockDoor: (vin: string, lock: boolean) =>
     `/lock_door/${encodeURIComponent(vin)}/${lock ? 1 : 0}`,
   chargings: () => '/vehicles/chargings',
+  trips: () => '/vehicles/trips',
 } as const
 
 async function request<T>(path: string, timeoutMs: number): Promise<T> {
@@ -417,6 +420,32 @@ export async function fetchChargingSessions(): Promise<ChargingSession[]> {
   return raw
     .map(normaliseSession)
     .filter((session) => session.startedAt !== null)
+    .sort((a, b) => (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0))
+}
+
+/**
+ * Completed trips, from psa_car_controller's own database — like /chargings it
+ * never touches the car.
+ *
+ * Every trip carries its whole GPS track in `positions`, so this response is
+ * substantially larger than the charging one and grows with the car's history.
+ * It is read on demand rather than on mount for that reason — see
+ * OdometerWidget.
+ *
+ * The bridge returns [] rather than an error when it has too little data yet.
+ */
+export async function fetchTrips(): Promise<Trip[]> {
+  const raw = await request<RawTrip[]>(endpoints.trips(), READ_TIMEOUT_MS)
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((trip) => {
+      const started = trip.start_at ? new Date(trip.start_at) : null
+      return {
+        startedAt: started && !Number.isNaN(started.getTime()) ? started : null,
+        distance: num(trip.distance),
+      }
+    })
+    .filter((trip) => trip.startedAt !== null)
     .sort((a, b) => (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0))
 }
 

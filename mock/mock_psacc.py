@@ -147,6 +147,53 @@ def charging_sessions() -> list:
     return sessions
 
 
+def trips() -> list:
+    """
+    Mirrors Trip.get_info(): one record per completed drive.
+
+    Two things about the real payload matter to the app and are reproduced
+    here. Flask's jsonify renders a datetime as an RFC 1123 HTTP-date, not
+    ISO 8601 -- if the client ever stops parsing that, the odometer tile's
+    week and month figures silently become zero. And there is no `vin` field,
+    because Trip.get_info() does not emit one.
+
+    Roughly a commute: two drives on most weekdays, over the last ten weeks, so
+    both the Mon-Sun week and the calendar month have something in them
+    whenever the mock is run.
+    """
+    now = datetime.now(timezone.utc)
+    records = []
+    odometer = state["mileage"]
+    # Newest first while walking backwards, so the odometer counts down to what
+    # it was; reversed at the end into the chronological order PSACC returns.
+    for day in range(0, 70):
+        date = now - timedelta(days=day)
+        if date.weekday() >= 5:  # weekends are quieter
+            if day % 3:
+                continue
+        for hour, minutes, km in ((17, 34, 18.6), (8, 12, 17.9)):
+            start = date.replace(hour=hour, minute=minutes, second=0, microsecond=0)
+            if start > now:
+                continue
+            records.append(
+                {
+                    "id": 1000 + len(records),
+                    # datetime.utcnow() formatting Flask applies to a datetime.
+                    "start_at": start.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                    "duration": round(km / 34 * 60, 1),  # minutes, as get_info sends
+                    "speed_average": 34.0,
+                    "distance": km,
+                    "mileage": round(odometer, 1),
+                    "consumption": round(km * 0.17, 2),
+                    "consumption_km": 17.0,
+                    "altitude_diff": 12,
+                    "positions": {"lat": [50.8, 50.81], "long": [-1.09, -1.1]},
+                }
+            )
+            odometer -= km
+    return list(reversed(records))
+
+
 def apply_precondition(on: bool) -> None:
     """Cabin warms and the traction battery drains, like the real thing."""
     with lock:
@@ -293,6 +340,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if parts == ["vehicles", "chargings"]:
             self._send(200, charging_sessions())
+            return
+
+        if parts == ["vehicles", "trips"]:
+            self._send(200, trips())
             return
 
         self._send(404, {"message": f"No mock route for /{'/'.join(parts)}"})

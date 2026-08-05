@@ -28,6 +28,11 @@ only — you already have the domain, tunnel, and nginx container.
 - **Readings** — charging state as a four-step plug-in sequence, cabin
   temperature, odometer, and 12V auxiliary voltage on a dial with the band the
   number has to stay inside.
+- **Odometer** — tap it to cycle the total, this week's distance and this
+  month's, summed from `/vehicles/trips`. The periods are calendar ones —
+  Monday to Sunday, the 1st of the month onward — rather than a trailing 30
+  days, so the figure means the same thing each time you look at it. Trips are
+  fetched on the first tap, not on load: each one carries its whole GPS track.
 - **A shape per tile**, after Material 3 Expressive's shape set, so the grid is
   legible before a word of it is read: lobed silhouettes for the soft or
   radiating quantities (cabin warmth, moving air, light, sound), a circle where
@@ -255,6 +260,7 @@ src/
 │   └── usePullToRefresh.ts
 ├── lock/              WebAuthn / PIN local lock
 ├── units.ts           km/mi and °C/°F conversion; display only
+├── periods.ts         calendar week/month boundaries; the odometer tile's sums
 └── components/        presentational; none of them touch a Raw type
     ├── Widget.tsx      the tile shell every section is built from
     ├── WidgetGrid.tsx  long-press pick-up, FLIP-animated reorder, autoscroll
@@ -390,11 +396,17 @@ Two caveats:
 
 ### Endpoints available but not surfaced in the UI
 
-The bridge also exposes `/wakeup/{VIN}`,
-`/lock_door/{VIN}/{0|1}`, `/horn/{VIN}/{count}`, `/lights/{VIN}/{duration}`,
-`/battery/soh/{VIN}`, `/position/{VIN}`, `/get_vehicles`, `/vehicles/trips` and
-`/vehicles/chargings`. These are outside the design doc's scope, so the UI does
-not use them.
+The bridge also exposes `/battery/soh/{VIN}`, `/position/{VIN}` and
+`/get_vehicles`. These are outside the design doc's scope, so the UI does not
+use them.
+
+One caveat on `/vehicles/trips`, which the odometer tile does use:
+`Trip.get_info()` emits no `vin`, so on a PSACC instance serving more than one
+car the trips cannot be told apart and the week/month figures would cover all of
+them. This app is single-VIN, so it does not arise here. Note also that Flask
+serialises each `start_at` as an RFC 1123 HTTP-date (`Wed, 05 Aug 2026 07:12:33
+GMT`) rather than ISO 8601 on Flask &lt; 2.3 — `new Date` reads both, and the
+mock sends the RFC 1123 form so that path stays exercised.
 
 ### The 12V voltage is often nonsense
 

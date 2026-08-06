@@ -144,10 +144,10 @@ self.addEventListener('fetch', (event) => {
 })
 
 /**
- * "Charging finished" notifications. The push itself is sent by
- * deploy/charge-notify/watcher.py, which polls the bridge independently of
- * any tab being open — this handler only has to render whatever payload it
- * sent. A malformed or empty payload still has to produce a notification:
+ * Charging notifications ("started", "finished"). The push itself is sent by
+ * deploy/charge_notify.py, which polls the bridge independently of any tab
+ * being open, and which decides *which* phones get which of the two — this
+ * handler only has to render whatever payload arrives. A malformed or empty payload still has to produce a notification:
  * Chrome revokes the push permission for a site that gets a push and shows
  * nothing for it ("silent push").
  */

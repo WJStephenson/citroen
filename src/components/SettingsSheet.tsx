@@ -9,10 +9,12 @@ import { setTheme } from '../theme'
 import { setUnits } from '../units'
 import {
   pushUnavailableMessage,
-  currentSubscription,
+  currentPushEvents,
   pushUnavailableReason,
-  subscribeToPush,
-  unsubscribeFromPush,
+  setPushEvents,
+  NO_PUSH_EVENTS,
+  type PushEventKind,
+  type PushEvents,
   type PushUnavailableReason,
 } from '../push'
 import {
@@ -28,17 +30,23 @@ interface Props {
   onLockChanged: () => void
 }
 
+/** Independent per device, and independent of each other — see push.ts. */
+const PUSH_SWITCHES: { kind: PushEventKind; label: string }[] = [
+  { kind: 'start', label: 'Notify when charging starts' },
+  { kind: 'finish', label: 'Notify when charging finishes' },
+]
+
 export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [vin, setVinValue] = useState(getVin())
   const [minutes, setMinutes] = useState(getPollMinutes())
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
-  // Whether *this* browser holds a live push subscription — checked async
+  // Which notifications *this* browser is signed up for — checked async
   // against the service worker registration, unlike everything else on this
-  // sheet, which reads a synchronous snapshot. Starts 'unknown' rather than
-  // false so the switch does not flash "off" before that check resolves.
-  const [pushState, setPushState] = useState<'unknown' | 'on' | 'off'>('unknown')
+  // sheet, which reads a synchronous snapshot. Null until that check
+  // resolves, rather than both-off, so neither switch flashes "off" first.
+  const [pushEvents, setPushEventsState] = useState<PushEvents | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
   // Set only when the switch is stuck off for a reason worth explaining —
   // an unsupported browser, a build with no VAPID key, or (the one a plain
@@ -59,11 +67,11 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
       if (cancelled) return
       setPushProblem(reason)
       if (reason) {
-        setPushState('off')
+        setPushEventsState(NO_PUSH_EVENTS)
         return
       }
-      void currentSubscription().then((sub) => {
-        if (!cancelled) setPushState(sub ? 'on' : 'off')
+      void currentPushEvents().then((events) => {
+        if (!cancelled) setPushEventsState(events)
       })
     })
     return () => {
@@ -71,20 +79,23 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
     }
   }, [])
 
-  const togglePush = async () => {
+  const togglePushEvent = async (kind: PushEventKind) => {
+    if (!pushEvents) return
+    const wanted = { ...pushEvents, [kind]: !pushEvents[kind] }
     setPushBusy(true)
     try {
-      if (pushState === 'on') {
-        await unsubscribeFromPush()
-        setPushState('off')
-        setNotice('Charge-finished notifications turned off on this device.')
+      const applied = await setPushEvents(wanted)
+      setPushEventsState(applied)
+      if (applied[kind] !== wanted[kind]) {
+        // Only ever happens one way: the permission prompt was denied or
+        // dismissed, so a switch the user just turned on came back off.
+        setNotice('Notification permission was denied — allow it in the browser/OS settings to turn this on.')
       } else {
-        const granted = await subscribeToPush()
-        setPushState(granted ? 'on' : 'off')
+        const label = kind === 'start' ? 'charging starts' : 'charging finishes'
         setNotice(
-          granted
-            ? 'This device will get a notification when charging finishes.'
-            : 'Notification permission was denied — allow it in the browser/OS settings to turn this on.',
+          applied[kind]
+            ? `This device will get a notification when ${label}.`
+            : `This device will no longer be notified when ${label}.`,
         )
       }
     } catch {
@@ -182,24 +193,26 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
         </p>
 
         <h3>Notifications</h3>
-        <div className="unit-row">
-          <span>Notify when charging finishes</span>
-          <button
-            type="button"
-            className={`switch ${pushState === 'on' ? 'is-on' : ''}`}
-            role="switch"
-            aria-checked={pushState === 'on'}
-            aria-label="Notify this device when charging finishes"
-            onClick={() => void togglePush()}
-            disabled={pushBusy || pushState === 'unknown' || pushProblem !== null}
-          >
-            <span className="switch-thumb" />
-          </button>
-        </div>
+        {PUSH_SWITCHES.map(({ kind, label }) => (
+          <div className="unit-row" key={kind}>
+            <span>{label}</span>
+            <button
+              type="button"
+              className={`switch ${pushEvents?.[kind] ? 'is-on' : ''}`}
+              role="switch"
+              aria-checked={pushEvents?.[kind] ?? false}
+              aria-label={`${label} on this device`}
+              onClick={() => void togglePushEvent(kind)}
+              disabled={pushBusy || pushEvents === null || pushProblem !== null}
+            >
+              <span className="switch-thumb" />
+            </button>
+          </div>
+        ))}
         <p className="note">
           {pushProblem
             ? pushUnavailableMessage(pushProblem)
-            : "Runs server-side, independent of this app being open — it'll arrive even if the phone is asleep. Reaches the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."}
+            : "Both run server-side, independent of this app being open — they'll arrive even if the phone is asleep. \"Finishes\" means reaching the setpoint on the Charge limit tile, or 100% when charge control isn't configured. Turned on separately per device; a household with several phones can have all of them notified, or just one."}
         </p>
 
         <h3>Electricity</h3>

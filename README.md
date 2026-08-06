@@ -86,12 +86,12 @@ only — you already have the domain, tunnel, and nginx container.
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
   with no network, then fetches live state.
-- **"Notify when charging finishes"** — a Web Push notification when the
+- **Charging notifications** — Web Push when a charge starts, and when the
   battery reaches the Charge limit tile's setpoint (100% if that isn't
   configured), delivered even with the app closed and the phone asleep —
-  see [Deploying](#deploying) and `deploy/charge_notify.py`. Off by default;
-  turned on per device in Settings, since not everyone in the household
-  necessarily wants to hear about it.
+  see [Deploying](#deploying) and `deploy/charge_notify.py`. Two independent
+  switches, both off by default and both chosen per device, since not everyone
+  in the household necessarily wants to hear about either.
 
 ---
 
@@ -472,11 +472,13 @@ lock's PIN or biometric enrolment — stay in that browser's own `localStorage`,
 since there is no single correct answer for those across a household (and a
 shared PIN would defeat the point of a *local* presence check).
 
-Push subscriptions (see ["Notify when charging finishes"](#what-it-does)
-above) are the one field here that is per-device data living in a shared blob
-rather than a household-wide preference: each phone's endpoint is unique to
-that phone, but *the list of who to notify* still has to be shared so
-`deploy/charge_notify.py` — which has no browser of its own — can read it.
+Push subscriptions (see ["Charging notifications"](#what-it-does) above) are
+the one field here that is per-device data living in a shared blob rather than
+a household-wide preference: each phone's endpoint is unique to that phone,
+and so is its choice of which of the two notifications it wants (stored as an
+`events` object on its own entry), but *the list of who to notify* still has
+to be shared so `deploy/charge_notify.py` — which has no browser of its own —
+can read it.
 
 This is the one place the PWA is no longer purely static: a small sidecar,
 `deploy/settings_store.py`, holds the shared settings as one JSON file and is

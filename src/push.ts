@@ -1,5 +1,11 @@
 /**
- * Web Push subscription management for "notify me when charging finishes".
+ * Web Push subscription management for the charging notifications.
+ *
+ * Two of them, chosen independently per device: when a charge starts, and
+ * when it reaches its setpoint. Both ride the same PushSubscription — a
+ * browser only ever mints one — so which of the two a device actually wants
+ * is stored *alongside* its entry in the shared list, as an `events` object,
+ * rather than as a second subscription.
  *
  * The subscription itself is per-device — each browser mints its own unique
  * PushSubscription — but *who to notify* is shared across every phone
@@ -7,7 +13,7 @@
  * api/sharedSettings.ts): whether someone hears about the charge finishing
  * is a property of the car, not of any one phone.
  *
- * The watching itself happens server-side, in deploy/charge-notify/watcher.py,
+ * The watching itself happens server-side, in deploy/charge_notify.py,
  * independent of any tab being open. It has to: useVehicle.ts's poll loop
  * deliberately suspends whenever the app is backgrounded, and a charge
  * finishing overnight is exactly when nobody has the tab open.
@@ -93,9 +99,25 @@ function applicationServerKey(base64url: string): Uint8Array {
   return Uint8Array.from(raw, (char) => char.charCodeAt(0))
 }
 
+/** The two things worth being told about. */
+export type PushEventKind = 'start' | 'finish'
+export type PushEvents = Record<PushEventKind, boolean>
+
+export const NO_PUSH_EVENTS: PushEvents = { start: false, finish: false }
+
+/**
+ * What a subscription with no `events` field means. Every subscription made
+ * before this setting existed was, by definition, a "tell me when charging
+ * finishes" one — so that is what the watcher and this module both read a
+ * missing field as, rather than silently turning those devices off. Same
+ * default lives in charge_notify.py::wants_event.
+ */
+const LEGACY_EVENTS: PushEvents = { start: false, finish: true }
+
 interface StoredSubscription {
   endpoint: string
   keys: { p256dh: string; auth: string }
+  events?: PushEvents
 }
 
 function isStoredSubscription(value: unknown): value is StoredSubscription {
@@ -106,6 +128,12 @@ function isStoredSubscription(value: unknown): value is StoredSubscription {
     typeof (value as StoredSubscription).keys?.p256dh === 'string' &&
     typeof (value as StoredSubscription).keys?.auth === 'string'
   )
+}
+
+function eventsOf(subscription: StoredSubscription): PushEvents {
+  const events = subscription.events
+  if (!events || typeof events !== 'object') return LEGACY_EVENTS
+  return { start: events.start === true, finish: events.finish === true }
 }
 
 function storedSubscriptions(): StoredSubscription[] {
@@ -131,6 +159,19 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 }
 
 /**
+ * Which notifications this browser is currently signed up for. All false
+ * either when it holds no subscription at all or when its entry has gone
+ * from the shared list (another device pruned it as expired) — from the
+ * settings sheet's point of view those are the same thing: both switches off.
+ */
+export async function currentPushEvents(): Promise<PushEvents> {
+  const subscription = await currentSubscription()
+  if (!subscription) return NO_PUSH_EVENTS
+  const stored = storedSubscriptions().find((s) => s.endpoint === subscription.endpoint)
+  return stored ? eventsOf(stored) : NO_PUSH_EVENTS
+}
+
+/**
  * Requests notification permission and subscribes this browser, adding it
  * to the shared list watcher.py reads. A device re-subscribing (its old
  * endpoint may have rotated) replaces its own prior entry by matching the
@@ -142,7 +183,7 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
  * prompt — that is an ordinary outcome the caller shows as "off", not an
  * error.
  */
-export async function subscribeToPush(): Promise<boolean> {
+export async function subscribeToPush(events: PushEvents): Promise<boolean> {
   if (!isPushSupported()) return false
   const permission = await Notification.requestPermission()
   if (permission !== 'granted') return false
@@ -152,7 +193,7 @@ export async function subscribeToPush(): Promise<boolean> {
     userVisibleOnly: true,
     applicationServerKey: applicationServerKey(VAPID_PUBLIC_KEY),
   })
-  const json = subscription.toJSON() as StoredSubscription
+  const json = { ...(subscription.toJSON() as StoredSubscription), events }
   const next = [...storedSubscriptions().filter((s) => s.endpoint !== json.endpoint), json]
   patchSharedSettings({ pushSubscriptions: next })
   return true
@@ -165,4 +206,33 @@ export async function unsubscribeFromPush(): Promise<void> {
   const endpoint = subscription.endpoint
   await subscription.unsubscribe()
   patchSharedSettings({ pushSubscriptions: storedSubscriptions().filter((s) => s.endpoint !== endpoint) })
+}
+
+/**
+ * Points this device's two switches at `events`, doing whatever subscribing
+ * or unsubscribing that implies: turning the first one on is what triggers
+ * the permission prompt, and turning the last one off unsubscribes outright
+ * rather than leaving a subscription behind that nothing would ever send to.
+ *
+ * Returns what is actually in effect afterwards, which is not always what
+ * was asked for — a denied permission prompt leaves both off.
+ */
+export async function setPushEvents(events: PushEvents): Promise<PushEvents> {
+  if (!events.start && !events.finish) {
+    await unsubscribeFromPush()
+    return NO_PUSH_EVENTS
+  }
+
+  const subscription = await currentSubscription()
+  if (!subscription) {
+    return (await subscribeToPush(events)) ? events : NO_PUSH_EVENTS
+  }
+
+  // Already subscribed: only the stored preference changes. The entry is
+  // rebuilt from the live subscription rather than patched in place, so a
+  // device whose entry went missing from the shared list puts itself back.
+  const json = { ...(subscription.toJSON() as StoredSubscription), events }
+  const next = [...storedSubscriptions().filter((s) => s.endpoint !== json.endpoint), json]
+  patchSharedSettings({ pushSubscriptions: next })
+  return events
 }

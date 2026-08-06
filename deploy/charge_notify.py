@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Watches psa_car_controller for a charging session reaching its setpoint and
-pushes a Web Push notification to every phone subscribed via the PWA's
-Settings sheet.
+Watches psa_car_controller for a charging session starting, and for one
+reaching its setpoint, and pushes a Web Push notification to every phone
+subscribed to that event via the PWA's Settings sheet.
 
 Runs independently of any browser tab being open — that's the whole point.
 The PWA's own poll loop (useVehicle.ts) deliberately suspends whenever the
@@ -29,15 +29,26 @@ store (GET/PUT {SETTINGS_URL}/) rather than here — see sharedSettings.ts /
 push.ts. This script only reads the `vin` and `pushSubscriptions` fields out
 of that shared blob, and writes `pushSubscriptions` back if a subscription
 has expired (the push service answers 404/410 for those; there is no other
-signal that a phone stopped listening).
+signal that a phone stopped listening). Each entry in that list carries its
+own `events` object saying which of the two notifications that device wants;
+see wants_event for what a missing one means.
 
-A push fires once per charging session, the first time the level reaches
-target while charging (or the car reports Finished outright — it can hit
-100% and call itself Finished before a percentage check would even matter).
-STATE_PATH tracks whether this session has already been notified, reset
-whenever the level drops meaningfully (a new session started) rather than on
-a specific status transition, since that is robust to a missed poll or a
-watcher restart mid-session in a way that edge-detection is not.
+There are two notifications, each sent only to the devices that asked for it:
+
+  - "charging started", on the poll where the status first becomes active
+    having been seen inactive. A pure edge, so a watcher whose state file is
+    missing does not announce a charge that began hours ago; the trade is
+    that a car pausing and resuming mid-session announces itself twice,
+    which is at least true.
+
+  - "charging finished", once per session, the first time the level reaches
+    target while charging (or the car reports Finished outright — it can hit
+    100% and call itself Finished before a percentage check would even
+    matter). STATE_PATH tracks whether this session has already been
+    notified, reset whenever the level drops meaningfully (a new session
+    started) rather than on a specific status transition, since that is
+    robust to a missed poll or a watcher restart mid-session in a way that
+    edge-detection is not.
 """
 
 from __future__ import annotations
@@ -165,12 +176,44 @@ def send_push(subscription: dict, payload: dict) -> bool:
         return True  # not a confirmed-gone subscription — keep it, retry next session
 
 
-def notify_all(subscriptions: list[dict], payload: dict) -> list[dict]:
-    """Sends to every subscription, returns the ones still good afterward."""
+def wants_event(subscription: dict, event: str) -> bool:
+    """
+    Whether this device asked to hear about `event` ("start" or "finish").
+
+    A subscription with no `events` field predates the setting existing, and
+    every one of those was made by tapping "notify when charging finishes" —
+    so that, and not both, is what it means. Same default in push.ts.
+    """
+    events = subscription.get("events")
+    if not isinstance(events, dict):
+        return event == "finish"
+    return events.get(event) is True
+
+
+def notify(subscriptions: list[dict], event: str, payload: dict) -> list[dict]:
+    """
+    Sends `payload` to every subscription that wants `event`, and returns the
+    full list minus any the push service confirmed is gone — pruning is about
+    the subscription being dead, so it applies to the whole list regardless of
+    which devices this particular event went to.
+    """
+    wanted = sum(1 for s in subscriptions if wants_event(s, event))
+    if wanted == 0:
+        return subscriptions
+
+    log(f"sending '{event}' to {wanted} of {len(subscriptions)} subscribed device(s)")
     survivors = []
     for subscription in subscriptions:
-        if send_push(subscription, payload):
-            survivors.append(subscription)
+        if wants_event(subscription, event) and not send_push(subscription, payload):
+            continue
+        survivors.append(subscription)
+
+    if len(survivors) != len(subscriptions):
+        try:
+            http_put(f"{SETTINGS_URL}/", {"pushSubscriptions": survivors})
+        except (urllib.error.URLError, TimeoutError):
+            log("could not prune expired subscriptions this round, will retry")
+            return subscriptions
     return survivors
 
 
@@ -201,8 +244,34 @@ def poll_once(state: dict) -> dict:
         session["notified"] = False
         session["seen_charging"] = False
 
-    if status in ACTIVE_STATUSES:
+    # Charging just started, as an edge rather than a state: "the car is
+    # charging" is true for hours, so only the transition into it is news.
+    # `was_charging` is None on the very first poll for this VIN (nothing on
+    # disk yet, or a wiped state file) and no announcement is made then —
+    # there is no way to tell a charge that started seconds ago from one
+    # that started overnight, and announcing the wrong one is worse.
+    charging_now = status in ACTIVE_STATUSES
+    started = charging_now and session.get("was_charging") is False
+    session["was_charging"] = charging_now
+
+    if charging_now:
         session["seen_charging"] = True
+
+    if started:
+        log(f"{vin} started charging at {level}% (target {target}%, status {status})")
+        subscriptions = notify(
+            subscriptions,
+            "start",
+            {
+                "title": "Charging started",
+                "body": (
+                    f"Battery at {int(level)}%, charging to {int(target)}%."
+                    if level is not None
+                    else f"Charging to {int(target)}%."
+                ),
+                "tag": "charge-status",
+            },
+        )
 
     # Two ways a session ends at its setpoint, and neither alone is enough:
     #
@@ -221,21 +290,16 @@ def poll_once(state: dict) -> dict:
     reached = not session["notified"] and session.get("seen_charging", False) and (finished or hit_target)
 
     if reached:
-        log(
-            f"{vin} finished at {level}% (target {target}%, status {status}), "
-            f"notifying {len(subscriptions)} device(s)"
+        log(f"{vin} finished at {level}% (target {target}%, status {status})")
+        subscriptions = notify(
+            subscriptions,
+            "finish",
+            {
+                "title": "Charging finished" if target >= 100 else f"Charging reached {int(target)}%",
+                "body": f"Battery is at {int(level)}%." if level is not None else "Charging has finished.",
+                "tag": "charge-status",
+            },
         )
-        payload = {
-            "title": "Charging finished" if target >= 100 else f"Charging reached {int(target)}%",
-            "body": f"Battery is at {int(level)}%." if level is not None else "Charging has finished.",
-            "tag": "charge-status",
-        }
-        survivors = notify_all(subscriptions, payload)
-        if len(survivors) != len(subscriptions):
-            try:
-                http_put(f"{SETTINGS_URL}/", {"pushSubscriptions": survivors})
-            except (urllib.error.URLError, TimeoutError):
-                log("could not prune expired subscriptions this round, will retry")
         session["notified"] = True
 
     session["last_level"] = level

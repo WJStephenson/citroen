@@ -80,14 +80,15 @@ docker exec <nginx-container> wget -qO- http://settings_store:8090/
 
 An empty `{}` is a healthy answer — it just means nothing has been saved yet.
 
-## 2c. Start "notify when charging finishes" (optional)
+## 2c. Start the charging notifications (optional)
 
-Push notifications for a charge reaching its setpoint, delivered even with
-the phone asleep and no tab open — see charge_notify.py for why this has to
-be a separate always-running process rather than something the PWA's own
-poll loop can catch, and why "the setpoint" means whatever PSACC's charge
-control is configured to (percentage_threshold), not a value configured
-twice.
+Push notifications for a charge starting, and for one reaching its setpoint,
+delivered even with the phone asleep and no tab open — see charge_notify.py
+for why this has to be a separate always-running process rather than
+something the PWA's own poll loop can catch, and why "the setpoint" means
+whatever PSACC's charge control is configured to (percentage_threshold), not
+a value configured twice. Each phone picks which of the two it wants, in
+Settings; this one service covers both.
 
 Generate a keypair (`generate_vapid_keys.py` explains the one-liner), then on
 the server:

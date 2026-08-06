@@ -161,6 +161,58 @@ container rebuild:
 rsync -av --delete dist/ you@server:/srv/citroen/
 ```
 
+## 4b. Rebuild and re-rsync on every commit (optional)
+
+Only worth it when the server is also where you build — a clone on the box,
+polled on a timer. `auto-deploy.sh` fetches `origin/main`, fast-forwards,
+builds, and rsyncs `dist/` into the bind mount from step 4.
+
+Copy it out of the repo rather than running it from the checkout it deploys —
+it pulls, and bash reads a script incrementally, so a pull that rewrote the
+running file could splice two versions together:
+
+```bash
+cp deploy/auto-deploy.sh /home/deck/docker/citroen/auto-deploy.sh
+```
+
+Edit the paths at the top (or set them in the unit's `Environment=`), then
+`~/.config/systemd/user/citroen-autodeploy.service`:
+
+```ini
+[Service]
+Type=oneshot
+Environment=PATH=/home/deck/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/deck/docker/citroen/auto-deploy.sh
+```
+
+and `citroen-autodeploy.timer`, then `systemctl --user enable --now
+citroen-autodeploy.timer`:
+
+```ini
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=3min
+AccuracySec=15s
+[Install]
+WantedBy=timers.target
+```
+
+It decides whether to build by comparing HEAD against the commit recorded in
+`.deployed-commit` beside the dist target — deliberately not by asking whether
+the fetch brought anything new. Those differ in the case that matters: commit
+on this machine and push, and HEAD already equals `origin/main`, so a
+fetch-based check sees nothing to do and the served bundle silently rots.
+Seed that file with the commit already deployed, or leave it absent for one
+redundant build.
+
+Two things it does **not** do. It never deploys unpushed commits, and it only
+syncs `dist/` — `charge_notify.py`, `settings_store.py` and the script itself
+are copied by hand, so a change to any of those needs the `cp` above plus a
+`docker compose restart` of the service that mounts it.
+
+Run `deploy/auto-deploy.test.sh` after changing it. That drives all thirteen
+branches against a throwaway repo and a stubbed npm, and touches nothing real.
+
 ## 5. Add the nginx server block
 
 Copy `nginx-citroen.conf` into nginx's `conf.d/`, and edit two lines:

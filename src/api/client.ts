@@ -76,6 +76,9 @@ export const endpoints = {
   trips: () => '/vehicles/trips',
 } as const
 
+/** Said the same way wherever it is raised — see the two throw sites below. */
+const OFFLINE_MESSAGE = 'No connection — this device is offline.'
+
 async function request<T>(path: string, timeoutMs: number): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -98,6 +101,10 @@ async function request<T>(path: string, timeoutMs: number): Promise<T> {
         'timeout',
       )
     }
+    // A dead radio and a dead bridge produce the same rejected fetch, but they
+    // are not the same fact and must not read as one: with no connection at
+    // all, nothing was asked of the bridge and nothing is known about it.
+    if (navigator.onLine === false) throw new ApiError(OFFLINE_MESSAGE, undefined, 'offline')
     throw new ApiError('Cannot reach the bridge.', undefined, 'network')
   } finally {
     clearTimeout(timer)
@@ -118,7 +125,15 @@ async function request<T>(path: string, timeoutMs: number): Promise<T> {
     throw new ApiError(`Unexpected response from the bridge (${response.status}).`, response.status)
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { message?: string } | null
+    const body = (await response.json().catch(() => null)) as
+      | { message?: string; error?: string }
+      | null
+    // The service worker answers a failed /api/* call with a synthetic 503 so
+    // the app gets JSON rather than a rejected fetch (see public/sw.js) — the
+    // one case where "offline" arrives as a response instead of an exception.
+    if (body?.error === 'offline') {
+      throw new ApiError(OFFLINE_MESSAGE, response.status, 'offline')
+    }
     throw new ApiError(body?.message ?? `Bridge returned ${response.status}.`, response.status)
   }
 

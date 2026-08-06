@@ -96,8 +96,12 @@ export function useVehicle(enabled: boolean): VehicleFeed {
       timer = window.setTimeout(tick, getPollMinutes() * 60_000)
     }
 
+    // Offline, the request cannot do anything but fail — and a failure would
+    // replace a perfectly good stale reading with an error. The timer keeps
+    // running so the poll resumes on its own schedule if the `online` event
+    // never arrives.
     const tick = () => {
-      if (document.visibilityState === 'visible') void refresh()
+      if (document.visibilityState === 'visible' && navigator.onLine !== false) void refresh()
       schedule()
     }
 
@@ -107,17 +111,39 @@ export function useVehicle(enabled: boolean): VehicleFeed {
       if (document.visibilityState !== 'visible') return
       const last = fetchedAtRef.current
       const stale = !last || Date.now() - last.getTime() > getPollMinutes() * 60_000
-      if (stale) void refresh()
+      if (stale && navigator.onLine !== false) void refresh()
       schedule()
     }
 
+    /*
+     * Coming back into signal is the one moment a poll is worth making off
+     * schedule: the reading on screen is by definition older than the outage,
+     * and the alternative is sitting on it for the rest of the interval. Only
+     * when the app is actually being looked at, though — a phone that regains
+     * signal in a pocket has nobody to show it to.
+     */
+    const onOnline = () => {
+      if (document.visibilityState === 'visible') void refresh()
+      schedule()
+    }
+
+    /*
+     * The first attempt is made even with no connection, unlike the ones on a
+     * timer. It fails immediately and costs nothing, and it is what resolves
+     * the initial loading state: a device that has never had a snapshot to
+     * fall back on would otherwise sit on the skeleton until the radio came
+     * back. The failure is also the honest thing to show — a cached reading
+     * carries an offline banner, an empty app carries "you are offline".
+     */
     void refresh()
     schedule()
     document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('online', onOnline)
 
     return () => {
       window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('online', onOnline)
     }
   }, [enabled, refresh])
 

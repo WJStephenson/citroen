@@ -2276,6 +2276,12 @@ button {
 .banner.is-error {
   background: color-mix(in srgb, var(--danger-fg) 18%, var(--surface));
   color: var(--danger-fg);
+}
+
+/* Some banners are buttons that reload or open Settings; the ones that only
+   report something (an error, being offline) are not, and must not offer a
+   cursor that says otherwise. */
+.banner:not(button) {
   cursor: default;
 }
 

@@ -194,7 +194,13 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
-    readonly kind: 'network' | 'auth' | 'timeout' | 'server' | 'config' = 'server',
+    /**
+     * 'offline' is narrower than 'network': the device itself has no
+     * connection, so the bridge was never reached and nothing about its health
+     * can be inferred. The UI says so rather than blaming the bridge — see
+     * App's banner.
+     */
+    readonly kind: 'network' | 'offline' | 'auth' | 'timeout' | 'server' | 'config' = 'server',
   ) {
     super(message)
     this.name = 'ApiError'

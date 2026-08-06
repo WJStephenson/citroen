@@ -88,7 +88,10 @@ only — you already have the domain, tunnel, and nginx container.
   with no network, then fetches live state. The last successful reading is kept
   on the device, so a cold start with no signal at all opens on the charge,
   range and location the car last reported, under a banner saying how old that
-  is — a car park is exactly where someone wonders what the charge was.
+  is — a car park is exactly where someone wonders what the charge was. Being
+  offline is reported as itself rather than as a broken bridge, polls are not
+  attempted into a dead radio, and the app refreshes on its own the moment
+  signal returns.
 - **Charging notifications** — Web Push when a charge starts, and when the
   battery reaches the Charge limit tile's setpoint (100% if that isn't
   configured), delivered even with the app closed and the phone asleep —
@@ -261,6 +264,7 @@ src/
 ├── hooks/
 │   ├── useVehicle.ts  telemetry, polling policy, visibility handling
 │   ├── useCommands.ts optimistic updates + the 30-90s latency window
+│   ├── useOnline.ts   whether the device has a radio, not whether the bridge answers
 │   └── usePullToRefresh.ts
 ├── lock/              WebAuthn / PIN local lock
 ├── units.ts           km/mi and °C/°F conversion; display only
@@ -541,6 +545,11 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   outside the 0.48–0.67 dark-mode band, so the chart uses `#30ae77` — the same
   hue, one validated step darker. The generated SVG was rasterised and inspected
   for label collisions and overflow.
+- The offline path was driven end to end in a headless browser against the
+  production build: with the network cut entirely, a reload is served the shell
+  by the service worker and the dashboard comes up on the stored reading, under
+  the banner that dates it. Restoring the connection clears the banner and
+  repolls without a reload.
 
 Not verified: real-device install and the WebAuthn lock (both need a real
 browser on HTTPS), the nginx config against a live psa_car_controller, and the

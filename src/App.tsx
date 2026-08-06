@@ -22,6 +22,7 @@ import { WidgetGrid, type WidgetItem } from './components/WidgetGrid'
 import { getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
 import { useCommands } from './hooks/useCommands'
+import { useOnline } from './hooks/useOnline'
 import { usePullToRefresh } from './hooks/usePullToRefresh'
 import { useVehicle } from './hooks/useVehicle'
 import { LockScreen } from './lock/LockScreen'
@@ -49,6 +50,7 @@ export default function App() {
 
   // Telemetry only flows once the app is unlocked.
   const vehicle = useVehicle(!lock.locked)
+  const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
   // A deliberate pull is the user asking the car itself, not the bridge cache.
   const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
@@ -205,10 +207,29 @@ export default function App() {
         </button>
       )}
 
-      {vehicle.error && (
-        <div className="banner is-error" role="alert">
-          {vehicle.error.message}
+      {/*
+        Offline outranks whatever error the last attempt produced: with a
+        stored reading on screen the app is still doing its job, and the
+        bridge's own errors are only worth showing when the device could
+        actually have reached it.
+        Amber rather than the accent, though it is not a fault and there is
+        nothing here to fix. Its job is to qualify every number below it — they
+        are all as old as the label says — and in this app green means a thing
+        is good, while amber is what "true, with a caveat" already looks like
+        on the low-12V and charge-fault notes.
+      */}
+      {!online ? (
+        <div className="banner is-warn" role="status">
+          {vehicle.fetchedAt
+            ? `Offline — showing the last reading, from ${relativeTime(vehicle.fetchedAt)}`
+            : 'Offline — nothing has been read from the car on this device yet'}
         </div>
+      ) : (
+        vehicle.error && (
+          <div className="banner is-error" role="alert">
+            {vehicle.error.message}
+          </div>
+        )
       )}
 
       <main className="content">

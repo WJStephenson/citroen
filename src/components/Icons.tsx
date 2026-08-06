@@ -222,6 +222,32 @@ export function PinIcon() {
   )
 }
 
+/** Efficiency: energy over ground covered — a bolt above the road it moves on. */
+export function EfficiencyIcon() {
+  return (
+    <svg {...light}>
+      <path d="M13 3 7.5 12h4l-1.5 6.5L16 9.5h-4L13 3Z" />
+      <path d="M3 21h5M11 21h10" />
+    </svg>
+  )
+}
+
+/*
+ * Battery health: the 12V tile's battery, with a pulse through it instead of
+ * terminals. The two readings are siblings — the condition of a battery — and
+ * drawing them from the same outline says so, while the interior keeps them
+ * from ever being read as the same tile.
+ */
+export function HealthIcon() {
+  return (
+    <svg {...light}>
+      <rect x="2.5" y="7" width="16" height="10" rx="2.5" />
+      <path d="M21.5 10.5v3" />
+      <path d="M5.5 12h2l1.5-3 2 6 1.5-3h2.5" />
+    </svg>
+  )
+}
+
 export function ChartIcon() {
   return (
     <svg {...light}>

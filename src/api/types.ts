@@ -150,10 +150,9 @@ export interface ChargingSession {
 /**
  * One trip from /vehicles/trips.
  *
- * The bridge sends far more than this per trip — consumption figures, an
- * altitude delta, and a `positions` object holding the whole GPS track — but
- * only the date and the distance are read here, so the rest is left undeclared
- * rather than modelled and ignored.
+ * The bridge sends more than this per trip — an altitude delta, and a
+ * `positions` object holding the whole GPS track — but only the fields read
+ * here are declared, rather than modelling the rest and ignoring it.
  */
 export interface RawTrip {
   id?: number
@@ -167,12 +166,22 @@ export interface RawTrip {
   distance?: number
   /** The odometer at the end of the trip, km. */
   mileage?: number
+  /** Energy used on this trip, kWh — Trip.get_info's `consumption`. */
+  consumption?: number
+  /**
+   * The bridge's own kWh/100km for this trip. Read as a fallback only: it is
+   * consumption/distance rounded by the bridge, and summing rounded rates
+   * across trips is not the same figure as summing energy and distance.
+   */
+  consumption_km?: number
 }
 
 export interface Trip {
   startedAt: Date | null
   /** km */
   distance: number | null
+  /** Energy used, kWh. */
+  energy: number | null
 }
 
 export type CommandKind =

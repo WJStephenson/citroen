@@ -16,11 +16,14 @@ import {
   CabinWidget,
   ChargeStateWidget,
   ChargeWidget,
+  EfficiencyWidget,
+  HealthWidget,
   OdometerWidget,
 } from './components/StatWidgets'
 import { WidgetGrid, type WidgetItem } from './components/WidgetGrid'
 import { getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
+import { useBatteryHealth } from './hooks/useBatteryHealth'
 import { useCommands } from './hooks/useCommands'
 import { useOnline } from './hooks/useOnline'
 import { usePullToRefresh } from './hooks/usePullToRefresh'
@@ -50,6 +53,7 @@ export default function App() {
 
   // Telemetry only flows once the app is unlocked.
   const vehicle = useVehicle(!lock.locked)
+  const soh = useBatteryHealth(!lock.locked)
   const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
   // A deliberate pull is the user asking the car itself, not the bridge cache.
@@ -97,12 +101,20 @@ export default function App() {
    * question the app exists to answer; the tiles you configure once and forget
    * sit under the ones you read every day.
    *
-   * The 12V tile is conditional — see isPlausibleAuxVoltage. A number that
-   * never changes, driving a low-voltage warning that can never fire, is worse
-   * than showing nothing: it looks like reassurance. Being conditional, it
-   * flips the parity of the half-width tiles, so it is placed last among them:
-   * when it is absent the gap that leaves falls beside the charge limit, at the
-   * break between what you read and what you schedule, rather than mid-grid.
+   * Two tiles are conditional, and both are placed at the end of a run of
+   * half-width ones for the same reason: each flips the parity of its run, and
+   * the grid never backfills a hole (see styles.css), so a missing tile has to
+   * leave its gap at a break in meaning rather than mid-grid.
+   *
+   *   battery health — the bridge only has a figure once the car has sent one,
+   *                    and the route is outside the design doc's scope. Its
+   *                    gap falls between what you read about the car and where
+   *                    the car is.
+   *   12V            — see isPlausibleAuxVoltage. A number that never changes,
+   *                    driving a low-voltage warning that can never fire, is
+   *                    worse than showing nothing: it looks like reassurance.
+   *                    Its gap falls beside the charge limit, at the break
+   *                    between what you read and what you schedule.
    */
   const state = vehicle.state
   const widgets: WidgetItem[] = state
@@ -116,6 +128,12 @@ export default function App() {
         },
         { id: 'cabin', label: 'Cabin temperature', node: <CabinWidget celsius={state.cabinTemp} /> },
         { id: 'odometer', label: 'Odometer', node: <OdometerWidget km={state.odometer} /> },
+        // Beside the odometer: the same trips answer both, and one tap on
+        // either loads them for the other (see hooks/useTrips).
+        { id: 'efficiency', label: 'Efficiency', node: <EfficiencyWidget /> },
+        ...(soh !== null
+          ? [{ id: 'health', label: 'Battery health', node: <HealthWidget soh={soh} /> }]
+          : []),
         {
           id: 'location',
           label: 'Location',

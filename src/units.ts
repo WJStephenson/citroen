@@ -65,6 +65,38 @@ export function formatDistance(km: number | null, unit: DistanceUnit): string {
 }
 
 /**
+ * How much energy the car is using, in the form the chosen distance unit is
+ * normally quoted in — and they are quoted the opposite way up from each other.
+ * Metric practice is kWh per 100 km, where lower is better; British and
+ * American EV drivers talk in miles per kWh, where higher is. Printing
+ * "kWh/100mi" because the app is in miles would be technically consistent and
+ * read as a foreign number.
+ *
+ * The ratio is returned split, numerator from denominator ("17.2 kWh" / "per
+ * 100 km"), because a half-width tile has no room for a nine-character unit
+ * beside a 34px number — the tile puts the second half on its note line
+ * instead. See EfficiencyWidget.
+ *
+ * Null when the pair cannot produce a ratio, rather than an infinity or a NaN
+ * dressed up as a reading.
+ */
+export function formatEfficiency(
+  energyKwh: number,
+  distanceKm: number,
+  unit: DistanceUnit,
+): { value: string; unit: string; per: string } | null {
+  if (!(distanceKm > 0) || !(energyKwh > 0)) return null
+  if (unit === 'mi') {
+    return {
+      value: (distanceKm / KM_PER_MILE / energyKwh).toFixed(1),
+      unit: 'mi',
+      per: 'per kWh',
+    }
+  }
+  return { value: ((energyKwh / distanceKm) * 100).toFixed(1), unit: 'kWh', per: 'per 100 km' }
+}
+
+/**
  * Whether a reading could actually be a 12V battery.
  *
  * status.battery.voltage is not dependable: upstream reports it carrying a

@@ -1,11 +1,19 @@
-import { useEffect, useState, type CSSProperties } from 'react'
-import { fetchTrips } from '../api/client'
-import type { ChargingStatus, Trip, VehicleState } from '../api/types'
+import { useState, type CSSProperties } from 'react'
+import type { ChargingStatus, VehicleState } from '../api/types'
+import { useTrips } from '../hooks/useTrips'
 import { useUnits } from '../hooks/useUnits'
-import { distanceSince, startOfMonth, startOfWeek } from '../periods'
-import { formatDistance, isPlausibleAuxVoltage } from '../units'
+import { distanceSince, startOfMonth, startOfWeek, usageSince } from '../periods'
+import { formatDistance, formatEfficiency, isPlausibleAuxVoltage } from '../units'
 import { Widget, WidgetNote, WidgetValue } from './Widget'
-import { BatteryIcon, BoltIcon, OdometerIcon, PlugIcon, ThermometerIcon } from './Icons'
+import {
+  BatteryIcon,
+  BoltIcon,
+  EfficiencyIcon,
+  HealthIcon,
+  OdometerIcon,
+  PlugIcon,
+  ThermometerIcon,
+} from './Icons'
 
 /** Meter contract: the fill carries severity, and the number stays in text ink. */
 function levelColour(level: number | null): string {
@@ -175,25 +183,14 @@ const NEXT_VIEW: Record<OdometerView, OdometerView> = {
 export function OdometerWidget({ km }: { km: number | null }) {
   const units = useUnits()
   const [view, setView] = useState<OdometerView>('total')
-  const [trips, setTrips] = useState<Trip[] | null>(null)
-  const [failed, setFailed] = useState(false)
-
   /*
-   * Fetched on the first tap that needs it, not on mount. Every trip in the
-   * response carries its whole GPS track, so this is the largest read the app
-   * makes — and the tile opens on the total, which the vehicle payload already
-   * has. Nobody who never taps it should pay for it.
+   * Trips are read on the first tap that needs them, not on mount: the tile
+   * opens on the total, which the vehicle payload already carries, and the
+   * trip response is the largest read the app makes. The store behind this is
+   * shared with the efficiency tile, so whichever is tapped first pays for
+   * both — see hooks/useTrips.
    */
-  useEffect(() => {
-    if (view === 'total' || trips !== null || failed) return
-    let live = true
-    fetchTrips()
-      .then((loaded) => live && setTrips(loaded))
-      .catch(() => live && setFailed(true))
-    return () => {
-      live = false
-    }
-  }, [view, trips, failed])
+  const { trips, failed, load, retry } = useTrips()
 
   const since =
     view === 'week' ? startOfWeek(new Date()) : view === 'month' ? startOfMonth(new Date()) : null
@@ -227,15 +224,117 @@ export function OdometerWidget({ km }: { km: number | null }) {
         }[view],
         onPress: () => {
           const next = NEXT_VIEW[view]
-          // A full lap back to the total is also the retry: a trip read that
-          // failed once should not leave the tile stuck on two dead views.
-          if (next === 'total') setFailed(false)
           setView(next)
+          // Tapping back into a period view is also the retry: a trip read that
+          // failed once must not leave the tile stuck on two dead views.
+          if (next !== 'total') (failed ? retry : load)()
         },
       }}
     >
       <WidgetValue value={pending ? '…' : value} unit={pending ? undefined : unit} />
       <WidgetNote>{note}</WidgetNote>
+    </Widget>
+  )
+}
+
+/* ---------- efficiency ---------- */
+
+/**
+ * What the car is actually using, over the same calendar periods the odometer
+ * counts distance in.
+ *
+ * Range answers "can I get there today"; this answers "is the car costing what
+ * it should" — the question behind a winter that suddenly looks expensive, or a
+ * tyre at the wrong pressure. It is worked out from summed energy over summed
+ * distance, never from averaging the bridge's per-trip rates, so a long steady
+ * run counts for more than a two-minute crawl to the shops.
+ *
+ * The tile shares the odometer's trip data and its tap-to-cycle idiom, and
+ * shows the same "tap me" invitation the first time, because the trip read is
+ * too big to make on mount for a tile that may never be looked at.
+ */
+type EfficiencyView = 'week' | 'month'
+
+export function EfficiencyWidget() {
+  const units = useUnits()
+  const [view, setView] = useState<EfficiencyView>('week')
+  const { trips, loading, failed, load, retry } = useTrips()
+
+  const since = view === 'week' ? startOfWeek(new Date()) : startOfMonth(new Date())
+  const usage = trips === null ? null : usageSince(trips, since)
+  const rate = usage === null ? null : formatEfficiency(usage.energy, usage.distance, units.distance)
+
+  const period = view === 'week' ? 'this week' : 'this month'
+  const note = failed
+    ? 'No trip history'
+    : loading
+      ? 'Reading trips…'
+      : trips === null
+        ? 'Tap to read trips'
+        : rate === null
+          ? `No consumption recorded ${period}`
+          : `${rate.per} · ${period}`
+
+  return (
+    <Widget
+      icon={<EfficiencyIcon />}
+      label="Efficiency"
+      className="widget-efficiency"
+      action={{
+        label:
+          trips === null
+            ? 'Read consumption from the trip history'
+            : view === 'week'
+              ? 'Show consumption this month'
+              : 'Show consumption this week',
+        onPress: () => {
+          // Nothing loaded yet: the first tap is the load, not a change of
+          // period — flipping to a second empty view would look like a fault.
+          if (trips === null) {
+            ;(failed ? retry : load)()
+            return
+          }
+          setView(view === 'week' ? 'month' : 'week')
+        },
+      }}
+    >
+      <WidgetValue value={rate?.value ?? (loading ? '…' : '—')} unit={rate?.unit} />
+      <WidgetNote>{note}</WidgetNote>
+    </Widget>
+  )
+}
+
+/* ---------- battery health ---------- */
+
+/**
+ * State of health: what the traction battery still holds against what it held
+ * when it left the factory.
+ *
+ * This is the one number on the dashboard that says something about the car as
+ * an asset rather than as today's transport, and it is the number a used-EV
+ * buyer asks for first. It moves by a percent or two a year, so it is
+ * deliberately quiet — no meter, no colour, nothing that invites checking it
+ * daily.
+ *
+ * Below 70% is the exception, because that is the floor Stellantis's own
+ * battery warranty is written to: a reading under it is not a curiosity, it is
+ * a claim.
+ */
+const SOH_WARRANTY_FLOOR = 70
+
+export function HealthWidget({ soh }: { soh: number }) {
+  const low = soh < SOH_WARRANTY_FLOOR
+
+  return (
+    <Widget
+      icon={<HealthIcon />}
+      label="Battery health"
+      className={`widget-health ${low ? 'is-warn' : ''}`}
+    >
+      <WidgetValue value={Math.round(soh)} unit="%" />
+      <WidgetNote tone={low ? 'warn' : undefined}>
+        {low ? 'Below the warranty floor' : 'Of original capacity'}
+      </WidgetNote>
     </Widget>
   )
 }

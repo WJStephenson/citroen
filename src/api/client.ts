@@ -74,6 +74,8 @@ export const endpoints = {
     `/lock_door/${encodeURIComponent(vin)}/${lock ? 1 : 0}`,
   chargings: () => '/vehicles/chargings',
   trips: () => '/vehicles/trips',
+  /** Traction-battery state of health, from the bridge's own records. */
+  batterySoh: (vin: string) => `/battery/soh/${encodeURIComponent(vin)}`,
 } as const
 
 /** Said the same way wherever it is raised — see the two throw sites below. */
@@ -455,13 +457,68 @@ export async function fetchTrips(): Promise<Trip[]> {
   return raw
     .map((trip) => {
       const started = trip.start_at ? new Date(trip.start_at) : null
+      const distance = num(trip.distance)
+      /*
+       * Energy is what the app aggregates on, so a trip that only carries the
+       * bridge's kWh/100km is turned back into kWh here rather than being
+       * dropped. Doing it at the edge means everything downstream sums two
+       * plain totals — energy and distance — instead of averaging rates, which
+       * would weight a two-mile crawl the same as a motorway run.
+       */
+      const derived = distance === null ? null : ((num(trip.consumption_km) ?? 0) * distance) / 100
       return {
         startedAt: started && !Number.isNaN(started.getTime()) ? started : null,
-        distance: num(trip.distance),
+        distance,
+        energy: num(trip.consumption) ?? (derived || null),
       }
     })
     .filter((trip) => trip.startedAt !== null)
     .sort((a, b) => (a.startedAt?.getTime() ?? 0) - (b.startedAt?.getTime() ?? 0))
+}
+
+/**
+ * Traction-battery state of health, as a percentage of the pack's original
+ * capacity.
+ *
+ * Read defensively, because this route is outside the design doc and its shape
+ * is not pinned the way the ones above are: it may answer with a bare number, a
+ * `{soh}` object, or a history of dated readings — the newest of which is the
+ * only one this app has a use for. Anything else reads as "not reported",
+ * which is a normal answer: the bridge only has a figure once the car has sent
+ * one.
+ *
+ * Never touches the car — same stance as /vehicles/chargings.
+ */
+export async function fetchBatterySoh(): Promise<number | null> {
+  const raw = await request<unknown>(endpoints.batterySoh(requireVin()), READ_TIMEOUT_MS)
+  return plausibleSoh(readSoh(raw))
+}
+
+/**
+ * A pack that has lost half its capacity is a written-off car, and 100% is
+ * only true on the day it was built — so a reading outside this band is the
+ * bridge reporting something that is not a state of health, and the tile is
+ * better absent than wrong. Same stance as isPlausibleAuxVoltage.
+ */
+function plausibleSoh(value: number | null): number | null {
+  return value !== null && value >= 50 && value <= 100 ? value : null
+}
+
+function readSoh(raw: unknown): number | null {
+  if (typeof raw === 'number') return num(raw)
+  if (Array.isArray(raw)) {
+    // A history, oldest-first the way the bridge's other tables come back.
+    const readings = raw.map(readSoh).filter((value): value is number => value !== null)
+    return readings.length ? (readings[readings.length - 1] as number) : null
+  }
+  if (raw && typeof raw === 'object') {
+    const record = raw as Record<string, unknown>
+    for (const key of ['soh', 'battery_soh', 'value', 'level']) {
+      const found = num(record[key])
+      if (found !== null) return found
+    }
+  }
+  return null
 }
 
 export function soundHorn(count = 1): Promise<CommandResult> {

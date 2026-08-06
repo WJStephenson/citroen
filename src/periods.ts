@@ -43,3 +43,40 @@ export function distanceSince(trips: Trip[], since: Date): number {
     0,
   )
 }
+
+/** What was driven in a period, and what it took to drive it. */
+export interface Usage {
+  /** km */
+  distance: number
+  /** kWh */
+  energy: number
+  /** How many trips these totals were summed from. */
+  trips: number
+}
+
+/**
+ * Distance and energy over the trips started at or after `since` — the pair an
+ * efficiency figure is worked out from.
+ *
+ * Only trips carrying *both* numbers are counted. A trip the bridge recorded
+ * without a consumption figure would otherwise add its kilometres to the
+ * denominator and nothing to the numerator, quietly reporting a car that ran
+ * part of the week on air. Dropping it costs a little coverage and keeps the
+ * ratio true, and `trips` is returned so a caller can say how thin the sample
+ * is.
+ */
+export function usageSince(trips: Trip[], since: Date): Usage {
+  return trips.reduce<Usage>(
+    (total, trip) => {
+      if (!trip.startedAt || trip.startedAt < since) return total
+      if (trip.distance === null || trip.energy === null) return total
+      if (trip.distance <= 0 || trip.energy < 0) return total
+      return {
+        distance: total.distance + trip.distance,
+        energy: total.energy + trip.energy,
+        trips: total.trips + 1,
+      }
+    },
+    { distance: 0, energy: 0, trips: 0 },
+  )
+}

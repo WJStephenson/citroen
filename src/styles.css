@@ -567,6 +567,21 @@ button {
   border-radius: var(--corner-sm) var(--corner-lg) var(--corner-sm) var(--corner-lg);
 }
 
+/*
+ * Efficiency and battery health take the neutral corner, and that is the
+ * decision rather than an omission. The vocabulary above is small on purpose —
+ * three signatures, each standing for a kind of reading — and neither of these
+ * belongs to one. Efficiency counts nothing and sequences nothing; health has
+ * no fill line and no schedule, and giving it the domed top would file it with
+ * the charge tiles, which is the one mistake a battery-health figure must never
+ * invite. A fourth signature invented for two tiles would leave every existing
+ * one meaning slightly less.
+ */
+.widget-efficiency,
+.widget-health {
+  border-radius: var(--radius-widget);
+}
+
 .widget-charge,
 .widget-limit {
   border-radius: var(--corner-lg) var(--corner-lg) var(--corner-sm) var(--corner-sm);

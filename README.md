@@ -33,6 +33,19 @@ only — you already have the domain, tunnel, and nginx container.
   Monday to Sunday, the 1st of the month onward — rather than a trailing 30
   days, so the figure means the same thing each time you look at it. Trips are
   fetched on the first tap, not on load: each one carries its whole GPS track.
+- **Efficiency** — kWh/100km over the same calendar week and month, in miles per
+  kWh if that is the unit you have chosen, because the two are quoted opposite
+  ways up and printing "kWh/100mi" would read as a foreign number. Summed energy
+  over summed distance, never an average of the bridge's per-trip rates, so a
+  motorway run counts for more than a crawl to the shops. It shares the
+  odometer's trip data: one tap on either loads it for both, and a session where
+  neither is touched never pays for the largest read the app makes.
+- **Battery health** — what the traction battery still holds against what it
+  left the factory with, from `/battery/soh/{VIN}`. Read once a session, since
+  it moves by a percent or two a year, and shown only when the bridge has a
+  figure that could actually be a state of health. Under 70% it turns amber:
+  that is the floor the battery warranty is written to, so a reading below it is
+  a claim rather than a curiosity.
 - **A shape per tile**, after Material 3 Expressive's shape set, so the grid is
   legible before a word of it is read: lobed silhouettes for the soft or
   radiating quantities (cabin warmth, moving air, light, sound), a circle where
@@ -264,11 +277,12 @@ src/
 ├── hooks/
 │   ├── useVehicle.ts  telemetry, polling policy, visibility handling
 │   ├── useCommands.ts optimistic updates + the 30-90s latency window
+│   ├── useTrips.ts    one trip fetch, shared by the odometer and efficiency
 │   ├── useOnline.ts   whether the device has a radio, not whether the bridge answers
 │   └── usePullToRefresh.ts
 ├── lock/              WebAuthn / PIN local lock
 ├── units.ts           km/mi and °C/°F conversion; display only
-├── periods.ts         calendar week/month boundaries; the odometer tile's sums
+├── periods.ts         calendar week/month boundaries; distance and energy summed over them
 └── components/        presentational; none of them touch a Raw type
     ├── Widget.tsx      the tile shell every section is built from
     ├── WidgetGrid.tsx  long-press pick-up, FLIP-animated reorder, autoscroll
@@ -412,15 +426,27 @@ Two caveats:
 
 ### Endpoints available but not surfaced in the UI
 
-The bridge also exposes `/battery/soh/{VIN}`, `/position/{VIN}` and
-`/get_vehicles`. These are outside the design doc's scope, so the UI does not
-use them.
+`/position/{VIN}` and `/get_vehicles` are outside the design doc's scope, so the
+UI does not use them.
 
-One caveat on `/vehicles/trips`, which the odometer tile does use:
-`Trip.get_info()` emits no `vin`, so on a PSACC instance serving more than one
-car the trips cannot be told apart and the week/month figures would cover all of
-them. This app is single-VIN, so it does not arise here. Note also that Flask
-serialises each `start_at` as an RFC 1123 HTTP-date (`Wed, 05 Aug 2026 07:12:33
+`/battery/soh/{VIN}` used to be on this list and now feeds the Battery health
+tile. It is read defensively, because unlike the routes above it its response
+shape is not pinned down anywhere this app can rely on: a bare number, a `{soh}`
+object and a list of dated readings are all accepted, the newest wins, and
+anything else — including a value outside 50–100%, which cannot be a state of
+health on a car that still drives — resolves to no tile at all. It never
+contacts the car, so it costs nothing but the request.
+
+One caveat on `/vehicles/trips`, which the odometer and efficiency tiles both
+use: `Trip.get_info()` emits no `vin`, so on a PSACC instance serving more than
+one car the trips cannot be told apart and the week/month figures would cover
+all of them. This app is single-VIN, so it does not arise here. The response
+also carries per-trip `consumption` (kWh) and `consumption_km`; the efficiency
+tile sums the former against `distance` rather than averaging the latter, and a
+trip missing either number is left out of both halves of the ratio instead of
+contributing distance the car apparently covered on no energy.
+
+Note also that Flask serialises each `start_at` as an RFC 1123 HTTP-date (`Wed, 05 Aug 2026 07:12:33
 GMT`) rather than ISO 8601 on Flask &lt; 2.3 — `new Date` reads both, and the
 mock sends the RFC 1123 form so that path stays exercised.
 
@@ -550,6 +576,10 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   by the service worker and the dashboard comes up on the stored reading, under
   the banner that dates it. Restoring the connection clears the banner and
   repolls without a reload.
+- Battery health was exercised against every shape the route might answer with —
+  a bare figure, a dated history, a 404 from a bridge that predates it, and a
+  value that cannot be a state of health — and the tile appears only in the two
+  cases where the answer means something.
 
 Not verified: real-device install and the WebAuthn lock (both need a real
 browser on HTTPS), the nginx config against a live psa_car_controller, and the

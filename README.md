@@ -79,9 +79,15 @@ only — you already have the domain, tunnel, and nginx container.
   decision: the lights are harmless and fire on the first tap, the horn asks for
   a second one.
 - **Charging history** — energy added per session, charted from
-  `/vehicles/chargings`, over a strip of totals, with a table view. Tap a bar
-  for that session's detail: where in the battery it charged (20→80% is not the
-  same event as 60→100%), how long it took, and what it cost.
+  `/vehicles/chargings`, over a strip of totals, with a table view. The window
+  is 10, 30 or every session the bridge holds: the shape of a year is a
+  different question from the shape of a month, and a battery taking less energy
+  per session is only visible from further back. Above it, month-to-date energy
+  and spend against the calendar — the period an electricity bill actually
+  arrives for, and the one figure here that does not move when the window does.
+  Pick a session, from the chart or from the table, for its detail: where in the
+  battery it charged (20→80% is not the same event as 60→100%), how long it
+  took, and what it cost.
 - **Electricity tariff** — day and night rates in p/kWh plus the hours the night
   rate applies, and each session's cost is split across the two by the time it
   spent in each. The bridge's own flat-rate figure is the fallback. See
@@ -548,7 +554,8 @@ device reconciles it.
 Built and verified on Node 24.18.1 / npm 11.16.0.
 
 - `npm run build` passes, including `tsc -b` under `strict` +
-  `noUncheckedIndexedAccess`. Output: 217 kB JS (69 kB gzipped), 8.8 kB CSS.
+  `noUncheckedIndexedAccess`. Output: 276 kB JS (87 kB gzipped), 31 kB CSS
+  (7.2 kB gzipped).
 - The service worker's build stamp is applied at build time, and the build now
   **fails** if the placeholder survives — it silently didn't get replaced the
   first time round.
@@ -580,6 +587,10 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   a bare figure, a dated history, a 404 from a bridge that predates it, and a
   value that cannot be a state of health — and the tile appears only in the two
   cases where the answer means something.
+- The charting was re-checked at 64 sessions, not just the six the mock ships:
+  bar width, date-label thinning, and the free-charge mark were all confirmed by
+  rasterising the tile, which is how the axis collision between a selected label
+  and a scheduled one was found and fixed.
 
 Not verified: real-device install and the WebAuthn lock (both need a real
 browser on HTTPS), the nginx config against a live psa_car_controller, and the

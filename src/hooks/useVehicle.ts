@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchVehicleState } from '../api/client'
 import { SHARED_SETTINGS_CHANGED } from '../api/sharedSettings'
+import { loadSnapshot, saveSnapshot } from '../api/snapshot'
 import { ApiError, type VehicleState } from '../api/types'
-import { getPollMinutes } from '../config'
+import { getPollMinutes, getVin } from '../config'
 
 export interface VehicleFeed {
   state: VehicleState | null
@@ -28,17 +29,24 @@ export interface VehicleFeed {
  * every poll can keep the car's ECUs awake and drain the 12V auxiliary battery.
  * The timer is also suspended whenever the app is not visible, so a PWA left
  * open in the background costs nothing.
+ *
+ * The feed opens on the last stored reading rather than on nothing (see
+ * api/snapshot.ts), so the dashboard is answerable the instant it is launched
+ * and stays answerable with no connection at all.
  */
 export function useVehicle(enabled: boolean): VehicleFeed {
-  const [state, setState] = useState<VehicleState | null>(null)
+  // Read once, at construction: a snapshot that lands mid-session would be
+  // older than whatever is already on screen.
+  const [cached] = useState(() => loadSnapshot(getVin()))
+  const [state, setState] = useState<VehicleState | null>(cached?.state ?? null)
   const [error, setError] = useState<ApiError | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(cached === null)
   const [refreshing, setRefreshing] = useState(false)
-  const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(cached?.fetchedAt ?? null)
 
   // Guards against two overlapping polls (manual pull + timer firing together).
   const inFlight = useRef<Promise<void> | null>(null)
-  const fetchedAtRef = useRef<Date | null>(null)
+  const fetchedAtRef = useRef<Date | null>(cached?.fetchedAt ?? null)
   const errorRef = useRef<ApiError | null>(null)
 
   const refresh = useCallback<VehicleFeed['refresh']>(async (options) => {
@@ -54,6 +62,8 @@ export function useVehicle(enabled: boolean): VehicleFeed {
         const now = new Date()
         fetchedAtRef.current = now
         setFetchedAt(now)
+        // Only a reading is stored, never a `patch`ed expectation.
+        saveSnapshot(next, now)
       } catch (caught) {
         const apiError =
           caught instanceof ApiError

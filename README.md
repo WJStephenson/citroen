@@ -85,7 +85,10 @@ only — you already have the domain, tunnel, and nginx container.
 - **App lock** — WebAuthn biometrics or a local PIN, re-armed when the app has
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
-  with no network, then fetches live state.
+  with no network, then fetches live state. The last successful reading is kept
+  on the device, so a cold start with no signal at all opens on the charge,
+  range and location the car last reported, under a banner saying how old that
+  is — a car park is exactly where someone wonders what the charge was.
 - **Charging notifications** — Web Push when a charge starts, and when the
   battery reaches the Charge limit tile's setpoint (100% if that isn't
   configured), delivered even with the app closed and the phone asleep —
@@ -253,7 +256,8 @@ src/
 ├── api/
 │   ├── client.ts          every psa_car_controller URL, in one place
 │   ├── types.ts           Raw* (what the bridge sends) vs VehicleState (what the UI renders)
-│   └── sharedSettings.ts  syncs VIN/tariff/layout/charge-hints with the settings store
+│   ├── sharedSettings.ts  syncs VIN/tariff/layout/charge-hints with the settings store
+│   └── snapshot.ts        the last reading, kept on the device for a cold start
 ├── hooks/
 │   ├── useVehicle.ts  telemetry, polling policy, visibility handling
 │   ├── useCommands.ts optimistic updates + the 30-90s latency window
@@ -268,7 +272,7 @@ src/
 public/sw.js           cache-first shell, network-only /api/*
 ```
 
-Two deliberate decisions worth knowing about:
+Three deliberate decisions worth knowing about:
 
 **Endpoint paths are centralised in `api/client.ts::endpoints`.** The real
 container has drifted from its own documentation before. If a path is wrong,
@@ -278,6 +282,14 @@ it is a one-line fix there, not a hunt through components.
 is optional, because the shape varies by firmware, by trim, and by whether the
 car has answered since its last deep sleep. `normalise()` in `client.ts` is the
 only place that copes with it; components see a strict `VehicleState`.
+
+**The dashboard opens on what it last knew, not on nothing.** Every successful
+poll writes a `VehicleState` to `localStorage`; `useVehicle` opens on it and
+replaces it when the first poll of the session lands. Only a reading is ever
+stored — the optimistic patches applied while a command is in flight are
+expectations, and persisting one would be the app remembering something the car
+never confirmed. A snapshot belonging to a different VIN is discarded rather
+than shown.
 
 ### The design doc's API was partly wrong
 

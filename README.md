@@ -73,8 +73,18 @@ only — you already have the domain, tunnel, and nginx container.
   marker for the present, so a window crossing midnight reads as a shape rather
   than as a caveat. These are two unrelated mechanisms in the bridge and can
   fail independently, so each time has its own confirm mark, which lights only
-  when that field differs from what the car was last told. Both can be cleared:
-  *Charge now* cancels a deferred start, *Clear stop* removes the stop time.
+  when that field differs from what the car was last told. *Clear stop* removes
+  the stop time.
+- **Charge type**, on the same tile — whether the car is *using* that window
+  (`DELAYED_CHARGE`) or charging the moment it is plugged in (`IMMEDIATE_CHARGE`),
+  as a two-way switch rather than the one-way *Charge now* button this used to
+  be. The two are separate settings in the car and only the hour is ever
+  reported back, so a car left on immediate goes on showing 23:00 on its own
+  dashboard, on this tile, and in `next_delayed_time` while charging at one in
+  the afternoon. The switch is lit by what can be *proved* about the car, not by
+  what was last tapped: charging outside its own window is proof, and is called
+  out in warning colour on the tile; anything else is reported as not known. See
+  [Things the bridge does not report back](#things-the-bridge-does-not-report-back).
 - **Lights** and **Horn** — one tile each, because they are not the same kind of
   decision: the lights are harmless and fire on the first tap, the horn asks for
   a second one.
@@ -142,7 +152,17 @@ async UI is genuinely exercisable. Useful flags:
 python mock/mock_psacc.py --fast      # skip the wake-up delay while iterating
 python mock/mock_psacc.py --flaky     # fail ~25% of commands, to test error paths
 python mock/mock_psacc.py --charging  # start plugged in and charging
+python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with 23:00–07:00
+                                      # stored: a schedule reported but ignored
 ```
+
+The mock models the charge *type* as well as the hours, since the two together
+are what make a deferred start work or silently not (see [The design doc's API
+was partly wrong](#the-design-docs-api-was-partly-wrong)). `--immediate` is
+that failure standing still: the window is set, `next_delayed_time` reports it,
+and the car charges anyway. `/charge_now/{VIN}/0` from the tile's charge-type
+switch stops it, and — as on the real car — so does setting any start hour,
+which is the confusing part worth being able to see.
 
 Open Settings (⚙) and set the VIN to `VR3UKZKXZMJ000000` to match the mock.
 
@@ -351,6 +371,26 @@ that reason.
   the car ignore the stored hour — that is what "Charge now" does.
   `/charge_now/{VIN}/0` puts it back on `DELAYED_CHARGE` at the stored hour.
 
+**The type is a setting, not a momentary override, and it is invisible.** Both
+directions are one message with one field swapped — `RemoteClient` sends the
+hour and the type together — which has three consequences worth stating plainly,
+because between them they produce a car that ignores a schedule it is still
+displaying:
+
+- `IMMEDIATE_CHARGE` persists across unplugging. A "Charge now" pressed once to
+  get a charge going this evening is still in force next week.
+- Nothing reports the type back. `next_delayed_time` carries the stored *hour*
+  and keeps carrying it either way, so the car's dashboard, the bridge and this
+  app all go on showing a window that is not being used.
+- `/charge_hour` carries `type=delayed` with the hour, so setting *any* start
+  time silently takes the car off immediate charge — and pauses the charge
+  running at the time if it is outside the new window. That is why re-setting the
+  schedule looks like it fixes the problem: it does, but as a side effect.
+
+The charge-type switch on the tile is the direct way back, and
+`observeChargeType` (`src/chargeWindow.ts`) is how the app tells you it is
+needed without a field to read.
+
 ### Pre-conditioning is on/off only
 
 There is no temperature setpoint anywhere in the chain — `RemoteClient` exposes
@@ -499,11 +539,42 @@ Both are read live now instead:
   `remaining_time` uses (`"PT23H"` for a 23:00 stored hour), confirmed
   against the bridge's own `parse_hour` (`common/utils.py`), which every
   `charge_now`/`get_charge_hour` call relies on to read this exact field
-  the same way. See `hhmmFromDuration` in `api/client.ts`.
+  the same way. See `hhmmFromDuration` in `api/client.ts`. A car holding no
+  delayed time at all sends `"PT0S"`, which is *not* midnight — both parts of
+  the shape are optional, and a duration carrying neither is no hour.
 
 Both tiles fall back to "not configured" honestly (see `chargeControlConfigured`
 on `VehicleState`) rather than showing a number nothing on the car is
 actually holding.
+
+**The charge type is still on this list, and cannot be taken off it.** Whether
+the car is on `IMMEDIATE_CHARGE` or `DELAYED_CHARGE` decides whether the start
+hour above means anything, and no endpoint reports it — `next_delayed_time`
+carries the stored hour in both cases. A schedule silently stops being honoured
+and every reading, including the car's own dashboard, goes on agreeing that it
+is set.
+
+So it is the one thing here that is *inferred*, in `src/chargeWindow.ts`, and
+the inference is deliberately one-sided:
+
+- **A car charging outside its own window is not honouring its hour.** There is
+  no other reading, so the tile says so in warning colour. Where no stop hour
+  bounds the window, a charge is assumed not to run more than 12 hours past the
+  start (`ASSUMED_MAX_CHARGE` — about half again what an e-C4 needs to fill from
+  empty on 7 kW), and only a charge outside *that* counts as proof. Rapid
+  charging is exempt: a DC charger starts on handshake whatever the schedule
+  says, so a Quick session proves nothing.
+- **Nothing is ever inferred in the reassuring direction.** A plugged-in idle
+  car looks like a schedule that is holding, but it looks exactly the same as a
+  charge that finished, one the limit cut short, or one the bridge stopped at
+  the stop hour. So the app never concludes `DELAYED_CHARGE` from a reading.
+
+With no proof either way the switch shows this device's own last command, said
+as such ("Set to charge now from this phone"), and with neither it says the type
+is not reported rather than lighting a side at random. That hint lives in
+component state and dies with the session — a hint that outlives the session it
+was made in is indistinguishable from a reading, which is the mistake the
+paragraph above this one is about.
 
 ---
 
@@ -554,8 +625,8 @@ device reconciles it.
 Built and verified on Node 24.18.1 / npm 11.16.0.
 
 - `npm run build` passes, including `tsc -b` under `strict` +
-  `noUncheckedIndexedAccess`. Output: 276 kB JS (87 kB gzipped), 31 kB CSS
-  (7.2 kB gzipped).
+  `noUncheckedIndexedAccess`. Output: 276 kB JS (87 kB gzipped), 32 kB CSS
+  (7.3 kB gzipped).
 - The service worker's build stamp is applied at build time, and the build now
   **fails** if the placeholder survives — it silently didn't get replaced the
   first time round.
@@ -587,6 +658,17 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   a bare figure, a dated history, a 404 from a bridge that predates it, and a
   value that cannot be a state of health — and the tile appears only in the two
   cases where the answer means something.
+- The charge-type inference was driven from the rendered DOM rather than from
+  the function: a car charging outside its window, one waiting outside it, one
+  rapid-charging outside it, one charging inside it, and a window with no stop
+  hour at 3 and at 14 hours past the start — the tile warns in exactly the two
+  cases it can prove and says "not reported" in the rest. `next_delayed_time`
+  was checked at `PT23H`, `PT7H30M`, `PT30M`, `PT0S`, absent and malformed. The
+  charge-type transitions were then run end to end against the mock, including
+  the one that confuses: setting a start hour on a car charging outside the new
+  window pauses the charge.
+- The tile was rasterised at 300, 340 and 420px to confirm the charge-type row
+  drops to its own line rather than breaking "Charge now" across two.
 - The charting was re-checked at 64 sessions, not just the six the mock ships:
   bar width, date-label thinning, and the free-charge mark were all confirmed by
   rasterising the tile, which is how the axis collision between a selected label

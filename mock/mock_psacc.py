@@ -14,9 +14,11 @@ Standard library only.
     /charge_hour?vin=&hour=&minute=       (START hour)
     /wakeup/<vin>, /charge_now/<vin>/<0|1>, /battery/soh/<vin>
 
-    python mock/mock_psacc.py          # listens on 127.0.0.1:5001
-    python mock/mock_psacc.py --fast   # no artificial wake-up delay
-    python mock/mock_psacc.py --flaky  # ~25% of commands fail, for error paths
+    python mock/mock_psacc.py             # listens on 127.0.0.1:5001
+    python mock/mock_psacc.py --fast      # no artificial wake-up delay
+    python mock/mock_psacc.py --flaky     # ~25% of commands fail, for error paths
+    python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with a
+                                          # schedule stored and ignored
 
 The Vite dev server proxies /api/* here (see vite.config.ts), stripping the
 prefix exactly as nginx does in production.
@@ -54,13 +56,74 @@ state = {
 lock = threading.Lock()
 
 args = argparse.Namespace(
-    fast=False, flaky=False, port=5001, no_charge_control=False, rate_limit=False
+    fast=False,
+    flaky=False,
+    port=5001,
+    no_charge_control=False,
+    rate_limit=False,
+    immediate=False,
 )
 
 
 def wake_delay() -> float:
     """The 30-90s window the doc's UI has to absorb."""
     return 0.4 if args.fast else random.uniform(30, 90)
+
+
+def as_duration(hhmm: str | None) -> str:
+    """
+    The PT#H#M shape the car reports next_delayed_time in -- "PT23H" for a
+    stored 23:00, and "PT0S" when it holds no delayed time at all. Despite the
+    swagger doc, it is a duration shape and not a timestamp; see hhmmFromDuration
+    in src/api/client.ts.
+    """
+    if not hhmm:
+        return "PT0S"
+    hour, minute = (int(part) for part in hhmm.split(":"))
+    if not hour and not minute:
+        return "PT0S"
+    return "PT" + (f"{hour}H" if hour else "") + (f"{minute}M" if minute else "")
+
+
+def to_minutes(hhmm: str | None) -> int | None:
+    if not hhmm:
+        return None
+    hour, minute = (int(part) for part in hhmm.split(":"))
+    return hour * 60 + minute
+
+
+def window_open() -> bool:
+    """Whether the clock is inside start_hour..stop_hour, wrapping midnight."""
+    start = to_minutes(state["start_hour"])
+    stop = to_minutes(state["stop_hour"])
+    if start is None or stop is None:
+        return False
+    now = datetime.now()
+    return (now.hour * 60 + now.minute - start) % 1440 < (stop - start) % 1440
+
+
+def settle_charge() -> None:
+    """
+    Reconcile the charge with the charge *type*, which is the half of a deferred
+    start that no endpoint reports back:
+
+      Immediate -- charges the moment it is plugged in, stored hour ignored
+      Delayed   -- charges only inside its window
+
+    Which is why setting a start hour on a car that is charging outside that
+    window pauses the charge: /charge_hour carries type=delayed with it. The
+    stored hour is untouched by any of this and keeps being reported either way,
+    exactly as the real car keeps showing it on the dashboard.
+
+    Caller holds the lock.
+    """
+    if state["charging_status"] not in ("InProgress", "Stopped"):
+        return  # unplugged, finished or failed: not this function's business
+    charging = state["charge_type"] == "Immediate" or window_open()
+    state["charging_status"] = "InProgress" if charging else "Stopped"
+    state["charging_mode"] = "Slow" if charging else "No"
+    state["remaining_time"] = "PT2H40M" if charging else "PT0M"
+    state["updated_at"] = datetime.now(timezone.utc)
 
 
 def vehicle_payload() -> dict:
@@ -79,7 +142,10 @@ def vehicle_payload() -> dict:
                     "charging_mode": s["charging_mode"],
                     "charging_rate": 22 if s["charging_status"] == "InProgress" else 0,
                     "remaining_time": s["remaining_time"],
-                    "next_delayed_time": "PT0S",
+                    # The stored hour, reported whether or not the car is
+                    # actually honouring it -- nothing in this payload says
+                    # which charge type is in force.
+                    "next_delayed_time": as_duration(s["start_hour"]),
                 },
             }
         ],
@@ -281,10 +347,14 @@ class Handler(BaseHTTPRequestHandler):
                     # ChargeControl.set_stop_hour treats [0, 0] as "disabled",
                     # so midnight is not a settable stop time.
                     state["stop_hour"] = None if (h, m) == (0, 0) else f"{h:02d}:{m:02d}"
+                    settle_charge()
+                # ChargeControl's own dict: the stop hour is the private
+                # `_stop_hour` pair, and [0, 0] is how it stores "disabled".
+                stop = to_minutes(state["stop_hour"])
                 config = {
                     "vin": query["vin"][0],
                     "percentage_threshold": state["charge_threshold"],
-                    "stop_hour": state["stop_hour"],
+                    "_stop_hour": [0, 0] if stop is None else [stop // 60, stop % 60],
                 }
             self._send(200, config)
             return
@@ -302,6 +372,12 @@ class Handler(BaseHTTPRequestHandler):
                 state["start_hour"] = (
                     f"{int(query['hour'][0]):02d}:{int(query['minute'][0]):02d}"
                 )
+                # change_charge_hour sends the hour *as* DELAYED_CHARGE -- one
+                # message carries both -- so setting an hour also takes the car
+                # off immediate charge, and pauses it if it is charging outside
+                # the new window.
+                state["charge_type"] = "Delayed"
+                settle_charge()
             self._send(200, {"result": "ok", "start_hour": state["start_hour"]})
             return
 
@@ -310,17 +386,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"result": "ok"})
             return
 
-        # Charge type: 1 = immediate (cancels the deferred start), 0 = delayed.
-        # The car keeps its stored hour either way; only the type changes.
+        # Charge type: 1 = immediate (ignores the deferred start), 0 = delayed
+        # (back on it). The car keeps its stored hour either way; only the type
+        # changes, and nothing reports the type back -- which is the whole
+        # reason a car can sit here charging at one in the afternoon with 23:00
+        # still on its dashboard.
         if parts[0] == "charge_now" and len(parts) == 3:
             time.sleep(wake_delay())
-            immediate = parts[2] == "1"
+            if args.flaky and random.random() < 0.25:
+                self._send(504, {"message": "Vehicle did not respond to the wake-up request."})
+                return
             with lock:
-                state["charge_type"] = "Immediate" if immediate else "Delayed"
-                if immediate:
-                    state["charging_status"] = "InProgress"
-                state["updated_at"] = datetime.now(timezone.utc)
-            self._send(200, {"result": "ok", "type": state["charge_type"]})
+                state["charge_type"] = "Immediate" if parts[2] == "1" else "Delayed"
+                settle_charge()
+                charge_type = state["charge_type"]
+            self._send(200, {"result": "ok", "type": charge_type})
             return
 
         if parts[:2] == ["battery", "soh"]:
@@ -380,22 +460,39 @@ def main() -> None:
         help="always return the rate-limit error for horn/lights/lock_door",
     )
     parser.add_argument(
+        "--immediate",
+        action="store_true",
+        help=(
+            "boot plugged in and charging on IMMEDIATE_CHARGE with 23:00-07:00 stored: "
+            "a car ignoring a schedule it is still reporting"
+        ),
+    )
+    parser.add_argument(
         "--no-charge-control",
         action="store_true",
         help="make charge_control return PSACC's 200-with-error response",
     )
     args = parser.parse_args()
 
-    if args.charging:
+    if args.charging or args.immediate:
         state["charging_status"] = "InProgress"
         state["charging_mode"] = "Slow"
         state["remaining_time"] = "PT2H40M"
+
+    if args.immediate:
+        state["charge_type"] = "Immediate"
+        state["start_hour"] = "23:00"
+        state["stop_hour"] = "07:00"
 
     threading.Thread(target=drift, daemon=True).start()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"mock psa_car_controller on http://127.0.0.1:{args.port}  (VIN {VIN})")
     print(f"  wake-up delay: {'off' if args.fast else '30-90s'}   flaky: {args.flaky}")
+    print(
+        f"  charge type: {state['charge_type']}   window: "
+        f"{state['start_hour']}-{state['stop_hour']}   status: {state['charging_status']}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

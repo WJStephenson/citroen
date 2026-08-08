@@ -191,11 +191,18 @@ function num(value: unknown): number | null {
  * field. "PT23H" is the stored hour 23:00, not "23 hours from now"; treating
  * it as a real timestamp silently produces nothing, since `new Date("PT23H")`
  * is Invalid Date.
+ *
+ * Both parts are optional in the shape, so a car holding no delayed time at
+ * all sends "PT0S" — which matched here on the bare "PT" with nothing
+ * captured and came back as "00:00", a midnight schedule nothing was actually
+ * holding. A duration carrying neither hours nor minutes is no hour, and says
+ * so.
  */
 function hhmmFromDuration(value: string | undefined): string | null {
   if (!value) return null
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?/.exec(value)
   if (!match) return null
+  if (match[1] === undefined && match[2] === undefined) return null
   const hour = Number(match[1] ?? 0)
   const minute = Number(match[2] ?? 0)
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null

@@ -74,25 +74,37 @@ export function formatSpan(minutes: number): string {
 }
 
 /**
- * What can be *proved* about the charge type from what the bridge does report.
+ * What the charge type can be read as, from what the bridge does report.
  *
- * A car that is charging outside its own window is not honouring its stored
- * hour — there is no other way to read it, and it is exactly the state a stray
- * "Charge now" leaves behind. That is worth saying out loud, because nothing
- * else on the car or in the app will: the hour stays on the dashboard, on the
- * infotainment screen, and in `next_delayed_time` throughout.
+ * Both answers come from the same question — is the car doing what its stored
+ * hour says? — asked of a car that is outside its own window, where the two
+ * types behave differently and the difference is therefore visible:
  *
- * Nothing here ever returns 'delayed'. An idle plugged-in car is *consistent*
- * with a schedule that is holding, but it is equally consistent with a charge
- * that finished, one the limit cut short, or one the bridge stopped at the
- * stop hour — so it proves nothing, and this returns null rather than guessing
- * in the reassuring direction. Saying "not reported" is the honest answer and
- * the tile is written to say it.
+ *   charging there     -> 'immediate'. It is not honouring the hour; there is
+ *                         no other way to read it, and it is exactly what a
+ *                         stray "Charge now" leaves behind.
+ *   plugged, waiting   -> 'delayed'. It is holding for the hour. A car on
+ *                         IMMEDIATE_CHARGE would have started when it was
+ *                         plugged in.
  *
- * Rapid charging is exempt. A DC charger starts the moment it handshakes,
- * schedule or no schedule — that is the point of one — so a Quick session
- * outside the window is not evidence of anything, and warning about it would
- * fire on every motorway stop.
+ * Neither is a field anybody reports, and the second is the weaker of the two:
+ * a charger doing its own scheduling at the wall (an Ohme, a Zappi) leaves a
+ * genuinely-immediate car sitting exactly like a well-behaved one. Which is
+ * why the tile shows the *evidence* alongside the answer ("plugged in and
+ * waiting for 23:00") rather than asserting a setting it cannot see. An
+ * inference the reader can check beats both a bare claim and a shrug.
+ *
+ * The narrower readings that say nothing about the type are excluded rather
+ * than guessed at:
+ *
+ *   - Inside the window, both types charge, so neither behaviour separates
+ *     them.
+ *   - A car at or above its limit has a reason to be idle that has nothing to
+ *     do with the hour.
+ *   - Rapid charging starts on handshake whatever the schedule says — that is
+ *     the point of it — so a Quick session outside the window is not evidence,
+ *     and warning about it would fire on every motorway stop.
+ *   - No stored hour at all: nothing to honour, nothing to conclude.
  */
 export function observeChargeType({
   charging,
@@ -100,63 +112,32 @@ export function observeChargeType({
   startAt,
   span,
   now,
+  battery,
+  limit,
 }: {
   charging: ChargingStatus
   mode: string | null
   startAt: number | null
   span: number | null
   now: number
-}): ChargeType | null {
-  if (startAt === null) return null
-  if (charging !== 'charging') return null
-  if (mode !== null && /quick|rapid|fast/i.test(mode)) return null
-  // Where "now" sits in the day measured from the start hour: small means the
-  // window has recently opened, and this could be the charge it asked for.
-  const since = (now - startAt + DAY) % DAY
-  return since < (span ?? ASSUMED_MAX_CHARGE) ? null : 'immediate'
-}
-
-/**
- * Whether a *remembered* 'immediate' has been overtaken by events.
- *
- * An observation is only true while it is being made — a car charging outside
- * its window proves nothing an hour after it stopped — and a command sent from
- * this phone can be undone from another one, from the car, or by anything that
- * sets a start hour. So the hint the tile falls back to needs a way to expire,
- * or it becomes the stale "last value any device sent" this app spent a
- * release getting rid of.
- *
- * This is that expiry. A car plugged in and *not* charging, outside its own
- * window, with room left below its limit, is not behaving like a car on
- * IMMEDIATE_CHARGE — that car would have started the moment it was plugged in.
- *
- * It is deliberately weaker than observeChargeType and used only to retire a
- * hint, never to assert 'delayed'. The reading has a confounder: a charger with
- * its own schedule (an Ohme or a Zappi doing the same job at the wall) leaves a
- * genuinely-immediate car sitting exactly like this. Retiring the hint costs
- * nothing when that happens — the tile falls back to "not reported", which is
- * true — where concluding 'delayed' from it would be a fresh wrong claim.
- */
-export function immediateRuledOut({
-  charging,
-  startAt,
-  span,
-  now,
-  battery,
-  limit,
-}: {
-  charging: ChargingStatus
-  startAt: number | null
-  span: number | null
-  now: number
   battery: number | null
   limit: number | null
-}): boolean {
-  if (startAt === null) return false
-  if (charging !== 'plugged-idle') return false
-  // Inside the window both types should be charging, so an idle car there says
-  // something about the charge, not about the type.
-  if (isWindowOpen(startAt, span, now)) return false
-  if (battery === null) return false
-  return battery < (limit ?? 100)
+}): ChargeType | null {
+  if (startAt === null) return null
+
+  // Where "now" sits in the day measured from the start hour: small means the
+  // window has recently opened, and a charge running could be the one it asked
+  // for. Beyond the window's own length — or, unbounded, beyond what a charge
+  // could plausibly still be — the car is outside it and the two types part.
+  const since = (now - startAt + DAY) % DAY
+  if (since < (span ?? ASSUMED_MAX_CHARGE)) return null
+
+  if (charging === 'charging') {
+    return mode !== null && /quick|rapid|fast/i.test(mode) ? null : 'immediate'
+  }
+  if (charging === 'plugged-idle') {
+    if (battery === null) return null
+    return battery < (limit ?? 100) ? 'delayed' : null
+  }
+  return null
 }

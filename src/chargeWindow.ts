@@ -115,3 +115,48 @@ export function observeChargeType({
   const since = (now - startAt + DAY) % DAY
   return since < (span ?? ASSUMED_MAX_CHARGE) ? null : 'immediate'
 }
+
+/**
+ * Whether a *remembered* 'immediate' has been overtaken by events.
+ *
+ * An observation is only true while it is being made — a car charging outside
+ * its window proves nothing an hour after it stopped — and a command sent from
+ * this phone can be undone from another one, from the car, or by anything that
+ * sets a start hour. So the hint the tile falls back to needs a way to expire,
+ * or it becomes the stale "last value any device sent" this app spent a
+ * release getting rid of.
+ *
+ * This is that expiry. A car plugged in and *not* charging, outside its own
+ * window, with room left below its limit, is not behaving like a car on
+ * IMMEDIATE_CHARGE — that car would have started the moment it was plugged in.
+ *
+ * It is deliberately weaker than observeChargeType and used only to retire a
+ * hint, never to assert 'delayed'. The reading has a confounder: a charger with
+ * its own schedule (an Ohme or a Zappi doing the same job at the wall) leaves a
+ * genuinely-immediate car sitting exactly like this. Retiring the hint costs
+ * nothing when that happens — the tile falls back to "not reported", which is
+ * true — where concluding 'delayed' from it would be a fresh wrong claim.
+ */
+export function immediateRuledOut({
+  charging,
+  startAt,
+  span,
+  now,
+  battery,
+  limit,
+}: {
+  charging: ChargingStatus
+  startAt: number | null
+  span: number | null
+  now: number
+  battery: number | null
+  limit: number | null
+}): boolean {
+  if (startAt === null) return false
+  if (charging !== 'plugged-idle') return false
+  // Inside the window both types should be charging, so an idle car there says
+  // something about the charge, not about the type.
+  if (isWindowOpen(startAt, span, now)) return false
+  if (battery === null) return false
+  return battery < (limit ?? 100)
+}

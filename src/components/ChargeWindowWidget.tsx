@@ -2,15 +2,24 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   clearChargeStartHour,
   clearChargeStopHour,
+  resumeDelayedCharge,
   setChargeStartHour,
   setChargeStopHour,
 } from '../api/client'
+import {
+  DAY,
+  formatSpan,
+  isWindowOpen,
+  minutesNow,
+  observeChargeType,
+  toMinutes,
+  windowSpan,
+  type ChargeType,
+} from '../chargeWindow'
 import type { Commands } from '../hooks/useCommands'
 import type { VehicleState } from '../api/types'
 import { BoltIcon, CheckIcon, ClockIcon } from './Icons'
 import { Widget } from './Widget'
-
-const DAY = 1440
 
 /*
  * Dial geometry, in the 100×100 viewBox the ring is drawn in. A charging window
@@ -37,9 +46,24 @@ const STUB = 15
  *
  * Clearing them works differently too, for the same reason:
  *   - Stop is cleared with the [0, 0] sentinel the bridge reads as "disabled".
- *   - Start has no "unset". The car always holds an hour; what changes is
- *     whether it charges immediately or waits, so clearing means switching to
- *     immediate charging.
+ *   - Start has no "unset". The car always holds an hour; what changes is the
+ *     charge *type* — whether it charges immediately or waits for that hour.
+ *
+ * Which makes the type a third setting, and it gets its own row rather than
+ * being the side effect of a button labelled something else. It used to be
+ * exactly that: a one-way "Charge now" that sent IMMEDIATE_CHARGE with no way
+ * back and nothing on the tile to show it had happened. The car kept the hour,
+ * so the dial, the headline and the car's own infotainment screen all went on
+ * showing a schedule the car had stopped honouring, and the only route back to
+ * it was re-sending a start hour — which works only because /charge_hour
+ * carries type=delayed along with the hour, and which pauses whatever charge is
+ * running at the time.
+ *
+ * Both directions are on the wire now (/charge_now/{VIN}/{1|0}) and the row
+ * says which one the car appears to be on. "Appears" is doing real work there —
+ * see observeChargeType. Nothing reports the type back, so the row shows an
+ * observation where there is one, this device's own last command where there is
+ * not, and "not reported" rather than a confident guess when it has neither.
  *
  * What the dial and headline show is read back from the car/bridge —
  * state.chargeStartHour from the car's own next_delayed_time, chargeStopHour
@@ -52,11 +76,12 @@ const STUB = 15
  * the live refresh useCommands.run schedules a few seconds later corrects it
  * if the car didn't actually take it.
  *
- * The tile is in three bands, top to bottom: what the window *is* (the dial and
- * its headline), what it is *set to* (the two editable rows), and the two
- * overrides that throw it away. Only the middle band is a form, and it is the
- * only part drawn on a raised panel — so the reading above it is a reading, not
- * the first field of one.
+ * The tile is in four bands, top to bottom: what the window *is* (the dial and
+ * its headline), what it is *set to* (the two editable rows), whether the car
+ * is using it at all (the charge type), and the override that throws the stop
+ * hour away. Only the second band is a form, and it is the only part drawn on a
+ * raised panel — so the reading above it is a reading, not the first field of
+ * one.
  */
 export function ChargeWindowWidget({ commands, state }: { commands: Commands; state: VehicleState }) {
   const [start, setStart] = useState(() => state.chargeStartHour ?? '00:30')
@@ -94,11 +119,44 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
 
   const disabled = Boolean(commands.active)
   /*
-   * One tile, three commands. The ring says this tile is working; each row's own
-   * spinner says which of its actions — the tile alone could not, and the start
-   * hour and the stop hour fail independently.
+   * One tile, three command kinds. The ring says this tile is working; each
+   * row's own spinner says which of its actions — the tile alone could not, and
+   * the start hour and the stop hour fail independently.
    */
   const kind = commands.active?.kind
+
+  const savedStart = state.chargeStartHour
+  const savedStop = state.chargeStopHour
+  const startAt = toMinutes(savedStart)
+  const stopAt = toMinutes(savedStop)
+
+  /* Crossing midnight is normal for an off-peak tariff, so it is measured
+     forward from the start rather than flagged as an error. */
+  const span = windowSpan(startAt, stopAt)
+  const overnight = stopAt !== null && startAt !== null && stopAt <= startAt
+  const open = isWindowOpen(startAt, span, now)
+
+  /*
+   * Which charge type the car is on, as well as it can be known — see
+   * observeChargeType. `assumed` is nothing grander than this device's memory
+   * of its own last command: worth showing while there is nothing better, and
+   * dropped the moment there is, which is what the effect below does. It is
+   * deliberately not persisted. A hint that outlives the session it was made in
+   * is indistinguishable from a reading, and this app has been bitten by that
+   * before (see the charge hints this tile used to show).
+   */
+  const [assumed, setAssumed] = useState<ChargeType | null>(null)
+  const observed = observeChargeType({
+    charging: state.charging,
+    mode: state.chargingMode,
+    startAt,
+    span,
+    now,
+  })
+  useEffect(() => {
+    if (observed && observed !== assumed) setAssumed(observed)
+  }, [observed, assumed])
+  const chargeType = observed ?? assumed
 
   const parse = (value: string): [number, number] | null => {
     const [h, m] = value.split(':').map(Number)
@@ -131,16 +189,32 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
     })
   }
 
-  // No optimistic chargeStartHour here: the car keeps holding whatever hour
-  // it had (that part of state.chargeStartHour stays true), what changes is
-  // only whether it honours it — which this tile has no live field for, so
-  // it is left to the outcome banner to say rather than guessed at here.
-  const clearStart = () =>
-    void commands.run({
-      kind: 'chargeNow',
-      label: 'Switching to immediate charging',
-      send: clearChargeStartHour,
-    })
+  /*
+   * The charge type, both directions on one command kind — they are the same
+   * message to the car with one field swapped, and only one of them can be in
+   * flight anyway.
+   *
+   * No optimistic patch: the car keeps holding whatever hour it had (that part
+   * of state.chargeStartHour stays true either way), and the thing that does
+   * change has no field on VehicleState to patch because the bridge never
+   * reports it. `assumed` stands in for that, and is only set once the bridge
+   * has acknowledged the command — a rejected command must not leave the row
+   * claiming a type the car never took.
+   */
+  const applyChargeType = (type: ChargeType) => {
+    void commands
+      .run({
+        kind: 'chargeNow',
+        label:
+          type === 'immediate'
+            ? 'Switching to immediate charging'
+            : 'Putting the car back on its schedule',
+        send: type === 'immediate' ? clearChargeStartHour : resumeDelayedCharge,
+      })
+      .then((sent) => {
+        if (sent) setAssumed(type)
+      })
+  }
 
   const clearStop = () =>
     void commands.run({
@@ -149,17 +223,6 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
       optimistic: { chargeStopHour: null },
       send: clearChargeStopHour,
     })
-
-  const savedStart = state.chargeStartHour
-  const savedStop = state.chargeStopHour
-  const startAt = toMinutes(savedStart)
-  const stopAt = toMinutes(savedStop)
-
-  /* Crossing midnight is normal for an off-peak tariff, so it is measured
-     forward from the start rather than flagged as an error. */
-  const span = startAt !== null && stopAt !== null ? (stopAt - startAt + DAY) % DAY : null
-  const overnight = span !== null && stopAt !== null && startAt !== null && stopAt <= startAt
-  const open = span !== null && startAt !== null && (now - startAt + DAY) % DAY < span
 
   const headline =
     savedStart && savedStop
@@ -183,8 +246,29 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
         ? (stopAt - now + DAY) % DAY
         : (startAt - now + DAY) % DAY
 
-  const meta =
-    span === 0
+  /*
+   * Every line below the headline used to assert the window was in force —
+   * "Starts in 9h 30m", "Waits until then to start" — on the strength of the
+   * hours alone, which is precisely the assertion the car can quietly stop
+   * honouring. When the type says otherwise, that claim is withdrawn rather
+   * than dressed up: the window is still *set*, it is simply not what the car
+   * is doing, and the row underneath says what to press about it.
+   */
+  const ignoringSchedule = chargeType === 'immediate' && savedStart !== null
+
+  /*
+   * Open says the clock is inside the window, which is not the same claim as
+   * the car acting on it. Both the badge and the arc's glow say "this is
+   * happening", so both stand down when the type says it is not — rather than
+   * glowing away next to a warning that contradicts them.
+   */
+  const showOpen = open && !ignoringSchedule
+
+  const meta = ignoringSchedule
+    ? observed
+      ? 'Charging now, outside the window'
+      : 'Set to charge now — the window is stored but unused'
+    : span === 0
       ? 'Start and stop are the same'
       : until !== null
         ? `${open ? 'Ends' : 'Starts'} in ${formatSpan(until)}${overnight ? ' · overnight' : ''}`
@@ -194,11 +278,29 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
             ? 'Starts immediately, stops then'
             : 'Charges as soon as it is plugged in'
 
+  /*
+   * What the charge-type row can honestly claim, in descending order of
+   * evidence: something the car is doing, something this phone asked for, and
+   * — the usual case — nothing at all.
+   */
+  const typeNote =
+    savedStart === null
+      ? 'The car reports no stored hour, so there is nothing to wait for'
+      : observed === 'immediate'
+        ? // The line above the panel has already said what is happening; this
+          // one says what it means and what the switch beside it is for.
+          `On immediate charge — ${savedStart} stays stored but unused`
+        : chargeType === 'immediate'
+          ? `Set to charge now from this phone — ${savedStart} stays stored, unused`
+          : chargeType === 'delayed'
+            ? `Set back to ${savedStart} from this phone`
+            : 'The car reports the hour it holds, never which of these it is on'
+
   return (
     <Widget
       icon={<ClockIcon />}
       label="Charging window"
-      className={`widget-window ${open ? 'is-open' : ''}`}
+      className={`widget-window ${showOpen ? 'is-open' : ''}`}
       working={kind === 'chargeStart' || kind === 'chargeStop' || kind === 'chargeNow'}
       outcome={commands.outcomeFor('chargeStart', 'chargeStop', 'chargeNow')}
     >
@@ -262,9 +364,9 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
         <div className="window-summary">
           <p className="window-time">
             {headline}
-            {open && <span className="window-open">Open</span>}
+            {showOpen && <span className="window-open">Open</span>}
           </p>
-          <p className="widget-note">{meta}</p>
+          <p className={`widget-note ${ignoringSchedule ? 'is-warn' : ''}`}>{meta}</p>
         </div>
       </div>
 
@@ -309,16 +411,44 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
         />
       </div>
 
+      {/*
+        The third band: whether the car is using the window above at all. It is
+        two commands, not a preference — each one wakes the car and takes the
+        same 30-90s as everything else on this tile — so the pair is lit by
+        what is known about the car rather than by what was last tapped, and
+        neither is lit when nothing is known.
+      */}
+      <div className={`window-mode ${ignoringSchedule ? 'is-warn' : ''}`}>
+        <div className="window-mode-row">
+          <span className="window-mode-label">
+            <BoltIcon />
+            Charge type
+          </span>
+          <div className="segmented is-pair" role="group" aria-label="Charge type">
+            <button
+              type="button"
+              className={`segment ${chargeType === 'delayed' ? 'is-selected' : ''}`}
+              aria-pressed={chargeType === 'delayed'}
+              onClick={() => applyChargeType('delayed')}
+              disabled={disabled || savedStart === null}
+            >
+              Schedule
+            </button>
+            <button
+              type="button"
+              className={`segment ${chargeType === 'immediate' ? 'is-selected' : ''}`}
+              aria-pressed={chargeType === 'immediate'}
+              onClick={() => applyChargeType('immediate')}
+              disabled={disabled}
+            >
+              Charge now
+            </button>
+          </div>
+        </div>
+        <p className={`window-mode-note ${observed === 'immediate' ? 'is-warn' : ''}`}>{typeNote}</p>
+      </div>
+
       <div className="window-actions">
-        <button
-          type="button"
-          className={`button ${kind === 'chargeNow' ? 'is-busy' : ''}`}
-          onClick={clearStart}
-          disabled={disabled}
-        >
-          <BoltIcon />
-          Charge now
-        </button>
         <button
           type="button"
           className="button is-quiet"
@@ -390,23 +520,4 @@ function WindowRow({
       {hint && <p className="window-hint">{hint}</p>}
     </div>
   )
-}
-
-function minutesNow(): number {
-  const date = new Date()
-  return date.getHours() * 60 + date.getMinutes()
-}
-
-function toMinutes(value: string | null): number | null {
-  if (!value) return null
-  const [h, m] = value.split(':').map(Number)
-  if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) return null
-  return h * 60 + m
-}
-
-function formatSpan(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  if (!h) return `${m}m`
-  return m ? `${h}h ${m}m` : `${h}h`
 }

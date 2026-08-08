@@ -81,9 +81,11 @@ only — you already have the domain, tunnel, and nginx container.
   be. The two are separate settings in the car and only the hour is ever
   reported back, so a car left on immediate goes on showing 23:00 on its own
   dashboard, on this tile, and in `next_delayed_time` while charging at one in
-  the afternoon. The switch is lit by what can be *proved* about the car, not by
-  what was last tapped: charging outside its own window is proof, and is called
-  out in warning colour on the tile; anything else is reported as not known. See
+  the afternoon. The switch is lit by what the car is *doing*, not by what was
+  last tapped — outside its own window the two types are told apart by whether
+  it charges or waits, and the tile says which it saw ("Plugged in and waiting
+  for 23:00", "On immediate charge — 23:00 stays stored but unused") rather than
+  asserting a setting nothing reports. See
   [Things the bridge does not report back](#things-the-bridge-does-not-report-back).
 - **Lights** and **Horn** — one tile each, because they are not the same kind of
   decision: the lights are harmless and fire on the first tap, the horn asks for
@@ -554,26 +556,34 @@ carries the stored hour in both cases. A schedule silently stops being honoured
 and every reading, including the car's own dashboard, goes on agreeing that it
 is set.
 
-So it is the one thing here that is *inferred*, in `src/chargeWindow.ts`, and
-the inference is deliberately one-sided:
+So it is the one thing here that is *inferred*, in `src/chargeWindow.ts`. The
+inference rests on a single fact: **outside its own window, the two types
+behave differently**, and that difference is reported.
 
-- **A car charging outside its own window is not honouring its hour.** There is
-  no other reading, so the tile says so in warning colour. Where no stop hour
-  bounds the window, a charge is assumed not to run more than 12 hours past the
-  start (`ASSUMED_MAX_CHARGE` — about half again what an e-C4 needs to fill from
-  empty on 7 kW), and only a charge outside *that* counts as proof. Rapid
-  charging is exempt: a DC charger starts on handshake whatever the schedule
-  says, so a Quick session proves nothing.
-- **Nothing is ever inferred in the reassuring direction.** A plugged-in idle
-  car looks like a schedule that is holding, but it looks exactly the same as a
-  charge that finished, one the limit cut short, or one the bridge stopped at
-  the stop hour. So the app never concludes `DELAYED_CHARGE` from a reading.
+- **Charging out there → `IMMEDIATE_CHARGE`.** It is not honouring the hour;
+  there is no other way to read it, and the tile says so in warning colour.
+- **Plugged in and waiting out there → `DELAYED_CHARGE`.** A car on immediate
+  would have started when it was plugged in.
 
-With no proof either way the switch shows this device's own last command, said
-as such ("Set to charge now from this phone"), and with neither it says the type
-is not reported rather than lighting a side at random.
+Where no stop hour bounds the window, "outside" means more than 12 hours past
+the start (`ASSUMED_MAX_CHARGE` — about half again what an e-C4 needs to fill
+from empty on 7 kW). Three readings are excluded rather than guessed at: inside
+the window both types charge; a car at or above its limit has a reason to be
+idle that has nothing to do with the hour; and rapid charging starts on
+handshake whatever the schedule says, so a Quick session outside the window is
+not evidence and warning about it would fire on every motorway stop.
 
-Both of those are held to their evidence, which took two goes to get right:
+The second reading is the weaker of the two — a charger doing its own
+scheduling at the wall leaves a genuinely-immediate car sitting exactly like a
+well-behaved one — which is why the tile shows the behaviour it read rather
+than the setting it inferred. "Plugged in and waiting for 23:00" is something
+you can walk outside and check; "on schedule" would be the app's word for it
+and nothing more.
+
+With no reading available the switch shows this device's own last command, said
+as such ("Set to charge now from this phone"), and with neither it says why it
+has nothing — unplugged, mostly. Two rules keep that hint from hardening into a
+claim, and both took a go to get right:
 
 - **An observation is never written down.** It is true in the present tense
   only: a car charging outside its window says nothing about the car an hour
@@ -581,14 +591,14 @@ Both of those are held to their evidence, which took two goes to get right:
   on being described that way long after a start hour had put it back — the
   first cut of this tile did exactly that, and reported a correctly-deferring
   car as ignoring its schedule.
-- **The hint retires when the car stops behaving like it.** A car plugged in
-  and *not* charging, outside its window, with room below its limit, is not a
-  car on `IMMEDIATE_CHARGE`. That is weaker evidence than the warning case —
-  a charger with its own schedule looks the same — so it is used only to drop
-  the hint back to "not reported", never to claim `DELAYED_CHARGE`. It also
-  waits for a reading the car has sent *since* the command: the car takes
-  30–90s to act, so the reading on screen when you press is from before you
-  pressed, and retiring on that would kill every hint the moment it was made.
+- **A command outranks the reading it was sent against.** The car takes 30–90s
+  to act, so the reading on screen when you press is necessarily from before you
+  pressed. Until the car has reported something *since* — a comparison of what
+  the car said, not of two clocks — the tile shows what was asked for. Without
+  that, pressing Schedule on a charging car is answered by the tile insisting,
+  from the stale reading, that it is still on immediate. Once the car has
+  answered and disagrees, the hint is dropped rather than kept for the next time
+  the car is unplugged and unreadable.
 
 The hint lives in component state and dies with the session — one that outlives
 the session it was made in is indistinguishable from a reading, which is the
@@ -678,19 +688,21 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   cases where the answer means something.
 - The charge-type inference was driven from the rendered DOM rather than from
   the function: a car charging outside its window, one waiting outside it, one
-  rapid-charging outside it, one charging inside it, and a window with no stop
-  hour at 3 and at 14 hours past the start — the tile warns in exactly the two
-  cases it can prove and says "not reported" in the rest. `next_delayed_time`
-  was checked at `PT23H`, `PT7H30M`, `PT30M`, `PT0S`, absent and malformed. The
+  idle at its limit, one unplugged, one rapid-charging outside it, one charging
+  inside it, and a window with no stop hour at 3 and at 14 hours past the start
+  — the tile reads the type in exactly the two cases the car's behaviour
+  separates them, and names what it read in the rest. `next_delayed_time` was
+  checked at `PT23H`, `PT7H30M`, `PT30M`, `PT0S`, absent and malformed. The
   charge-type transitions were then run end to end against the mock, including
   the one that confuses: setting a start hour on a car charging outside the new
   window pauses the charge.
 - The tile was then driven through the state changes in a real browser, not just
-  rendered: a car seen ignoring its window and then stopping (the observation is
-  not remembered), a command from this phone surviving both the reading it was
-  made against and a re-render of it, the same command retired by the next
-  reading that disagrees, a full car retiring nothing because it proves nothing,
-  and proof overriding a hint that contradicts it.
+  rendered: a car seen ignoring its window and then waiting (the observation is
+  not remembered, and the waiting car reads as scheduled), a command surviving
+  both the reading it was sent against and a re-render of it, the same command
+  overridden by the next reading that disagrees and kept by one that reads
+  nothing, and Schedule pressed on a charging car not being argued with by the
+  stale reading it was sent against.
 - The tile was rasterised at 300, 340 and 420px to confirm the charge-type row
   drops to its own line rather than breaking "Charge now" across two.
 - The charting was re-checked at 64 sessions, not just the six the mock ships:

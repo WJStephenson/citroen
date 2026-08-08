@@ -9,7 +9,6 @@ import {
 import {
   DAY,
   formatSpan,
-  immediateRuledOut,
   isWindowOpen,
   minutesNow,
   observeChargeType,
@@ -140,26 +139,19 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
   /*
    * Which charge type the car is on, as well as it can be known.
    *
-   * `observed` is proof and is only ever true in the present tense — see
-   * observeChargeType. It is deliberately *not* remembered: a car charging
-   * outside its window says nothing about the car an hour after it stopped, and
-   * writing that observation down turns a momentary reading into a claim that
+   * `observed` is read from what the car is doing right now — see
+   * observeChargeType — and is deliberately never remembered. A car charging
+   * outside its window says nothing about the car an hour after it stopped, so
+   * writing the observation down turns a momentary reading into a claim that
    * outlives it. (It did exactly that in the first cut of this tile: a car that
-   * had been on immediate went on being described as such long after a start
+   * had been on immediate went on being described that way long after a start
    * hour had put it back on schedule.)
    *
    * `assumed` is nothing grander than this device's memory of its own last
-   * command, shown while there is nothing better and retired once the car stops
-   * behaving like it — see immediateRuledOut. It is not persisted either. A
-   * hint that outlives the session it was made in is indistinguishable from a
-   * reading, and this app has been bitten by that before (see the charge hints
-   * this tile used to show).
-   *
-   * It carries the reading it was made against, because the car takes 30-90s to
-   * act and the reading on screen when you press is necessarily from before you
-   * pressed. Retiring the hint on *that* would kill it the instant it was made,
-   * every time. So the hint only answers to a reading the car has sent since —
-   * a comparison of what the car said, not of two clocks.
+   * command, for the stretches where the car's behaviour separates neither type
+   * — unplugged, mostly. It is not persisted: a hint that outlives the session
+   * it was made in is indistinguishable from a reading, and this app has been
+   * bitten by that before (see the charge hints this tile used to show).
    */
   const [assumed, setAssumed] = useState<{ type: ChargeType; against: number | null } | null>(null)
   const observed = observeChargeType({
@@ -168,22 +160,34 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
     startAt,
     span,
     now,
-  })
-  const ruledOut = immediateRuledOut({
-    charging: state.charging,
-    startAt,
-    span,
-    now,
     battery: state.battery,
     limit: state.chargeControlConfigured ? state.chargeLimitPercent : null,
   })
+
+  /*
+   * The car takes 30-90s to act, so the reading on screen when you press a
+   * button is necessarily from before you pressed it. Until the car has
+   * reported something *since*, what was asked for outranks what can be seen —
+   * otherwise pressing Schedule on a charging car is answered by the tile
+   * insisting, from the stale reading, that it is still on immediate.
+   *
+   * The test is on the reading the car sent, not on a clock: the car's and the
+   * phone's are two different clocks and neither is ours to trust.
+   */
   const reportedAt = state.reportedAt?.getTime() ?? null
+  const answered = assumed === null || reportedAt !== assumed.against
+  /* Everything the tile says about the charge type comes through here, so the
+     segments, the note and the warning cannot end up telling three stories —
+     the whole row goes quiet together while a command is unanswered. */
+  const reading = answered ? observed : null
+  const chargeType = reading ?? assumed?.type ?? null
+
+  // Once the car has answered and disagrees, the hint has been overtaken —
+  // by another phone, by the car, or by any start hour set since. Drop it, so
+  // it cannot resurface the next time the car is unplugged and unreadable.
   useEffect(() => {
-    if (assumed?.type !== 'immediate') return
-    if (!ruledOut || reportedAt === assumed.against) return
-    setAssumed(null)
-  }, [assumed, ruledOut, reportedAt])
-  const chargeType = observed ?? assumed?.type ?? null
+    if (answered && observed && assumed && observed !== assumed.type) setAssumed(null)
+  }, [answered, observed, assumed])
 
   const parse = (value: string): [number, number] | null => {
     const [h, m] = value.split(':').map(Number)
@@ -281,12 +285,12 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
    * rather than dressed up: the window is still *set*, it is simply not what
    * the car is doing, and the row underneath says what to press about it.
    *
-   * Proof only. A hint from this phone lights its own segment and says so in
-   * its own row; it does not get to overwrite the reading above it or paint it
-   * as a warning. Warning colour on this dashboard means the car is doing
-   * something, and a remembered command is not the car doing anything.
+   * Read from the car only. A hint from this phone lights its own segment and
+   * says so in its own row; it does not get to overwrite the reading above it
+   * or paint it as a warning. Warning colour on this dashboard means the car is
+   * doing something, and a remembered command is not the car doing anything.
    */
-  const ignoringSchedule = observed === 'immediate'
+  const ignoringSchedule = reading === 'immediate'
 
   /*
    * Open says the clock is inside the window, which is not the same claim as
@@ -309,22 +313,30 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
             : 'Charges as soon as it is plugged in'
 
   /*
-   * What the charge-type row can honestly claim, in descending order of
-   * evidence: something the car is doing, something this phone asked for, and
-   * — the usual case — nothing at all.
+   * What the row can say, in descending order of evidence: what the car is
+   * doing, what this phone last asked for, and why neither is available.
+   *
+   * The first two both name the behaviour they are read from rather than
+   * asserting a setting nothing reports — "plugged in and waiting for 23:00" is
+   * something you can look out of the window and check, where "on schedule"
+   * would be the app's word for it and nothing more.
    */
   const typeNote =
     savedStart === null
       ? 'The car reports no stored hour, so there is nothing to wait for'
-      : observed === 'immediate'
+      : reading === 'immediate'
         ? // The line above the panel has already said what is happening; this
           // one says what it means and what the switch beside it is for.
           `On immediate charge — ${savedStart} stays stored but unused`
-        : chargeType === 'immediate'
-          ? `Set to charge now from this phone — ${savedStart} stays stored, unused`
-          : chargeType === 'delayed'
-            ? `Set back to ${savedStart} from this phone`
-            : 'The car reports the hour it holds, never which of these it is on'
+        : reading === 'delayed'
+          ? `Plugged in and waiting for ${savedStart}`
+          : chargeType === 'immediate'
+            ? `Set to charge now from this phone — ${savedStart} stays stored, unused`
+            : chargeType === 'delayed'
+              ? `Set back to ${savedStart} from this phone`
+              : state.charging === 'disconnected'
+                ? 'Not plugged in — the car only shows which it is on by what it does'
+                : 'Nothing the car is doing right now separates the two'
 
   return (
     <Widget
@@ -475,7 +487,7 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
             </button>
           </div>
         </div>
-        <p className={`window-mode-note ${observed === 'immediate' ? 'is-warn' : ''}`}>{typeNote}</p>
+        <p className={`window-mode-note ${reading === 'immediate' ? 'is-warn' : ''}`}>{typeNote}</p>
       </div>
 
       <div className="window-actions">

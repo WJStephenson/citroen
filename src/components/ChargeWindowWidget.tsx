@@ -9,6 +9,7 @@ import {
 import {
   DAY,
   formatSpan,
+  immediateRuledOut,
   isWindowOpen,
   minutesNow,
   observeChargeType,
@@ -137,15 +138,30 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
   const open = isWindowOpen(startAt, span, now)
 
   /*
-   * Which charge type the car is on, as well as it can be known — see
-   * observeChargeType. `assumed` is nothing grander than this device's memory
-   * of its own last command: worth showing while there is nothing better, and
-   * dropped the moment there is, which is what the effect below does. It is
-   * deliberately not persisted. A hint that outlives the session it was made in
-   * is indistinguishable from a reading, and this app has been bitten by that
-   * before (see the charge hints this tile used to show).
+   * Which charge type the car is on, as well as it can be known.
+   *
+   * `observed` is proof and is only ever true in the present tense — see
+   * observeChargeType. It is deliberately *not* remembered: a car charging
+   * outside its window says nothing about the car an hour after it stopped, and
+   * writing that observation down turns a momentary reading into a claim that
+   * outlives it. (It did exactly that in the first cut of this tile: a car that
+   * had been on immediate went on being described as such long after a start
+   * hour had put it back on schedule.)
+   *
+   * `assumed` is nothing grander than this device's memory of its own last
+   * command, shown while there is nothing better and retired once the car stops
+   * behaving like it — see immediateRuledOut. It is not persisted either. A
+   * hint that outlives the session it was made in is indistinguishable from a
+   * reading, and this app has been bitten by that before (see the charge hints
+   * this tile used to show).
+   *
+   * It carries the reading it was made against, because the car takes 30-90s to
+   * act and the reading on screen when you press is necessarily from before you
+   * pressed. Retiring the hint on *that* would kill it the instant it was made,
+   * every time. So the hint only answers to a reading the car has sent since —
+   * a comparison of what the car said, not of two clocks.
    */
-  const [assumed, setAssumed] = useState<ChargeType | null>(null)
+  const [assumed, setAssumed] = useState<{ type: ChargeType; against: number | null } | null>(null)
   const observed = observeChargeType({
     charging: state.charging,
     mode: state.chargingMode,
@@ -153,10 +169,21 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
     span,
     now,
   })
+  const ruledOut = immediateRuledOut({
+    charging: state.charging,
+    startAt,
+    span,
+    now,
+    battery: state.battery,
+    limit: state.chargeControlConfigured ? state.chargeLimitPercent : null,
+  })
+  const reportedAt = state.reportedAt?.getTime() ?? null
   useEffect(() => {
-    if (observed && observed !== assumed) setAssumed(observed)
-  }, [observed, assumed])
-  const chargeType = observed ?? assumed
+    if (assumed?.type !== 'immediate') return
+    if (!ruledOut || reportedAt === assumed.against) return
+    setAssumed(null)
+  }, [assumed, ruledOut, reportedAt])
+  const chargeType = observed ?? assumed?.type ?? null
 
   const parse = (value: string): [number, number] | null => {
     const [h, m] = value.split(':').map(Number)
@@ -212,7 +239,7 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
         send: type === 'immediate' ? clearChargeStartHour : resumeDelayedCharge,
       })
       .then((sent) => {
-        if (sent) setAssumed(type)
+        if (sent) setAssumed({ type, against: state.reportedAt?.getTime() ?? null })
       })
   }
 
@@ -250,11 +277,16 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
    * Every line below the headline used to assert the window was in force —
    * "Starts in 9h 30m", "Waits until then to start" — on the strength of the
    * hours alone, which is precisely the assertion the car can quietly stop
-   * honouring. When the type says otherwise, that claim is withdrawn rather
-   * than dressed up: the window is still *set*, it is simply not what the car
-   * is doing, and the row underneath says what to press about it.
+   * honouring. When the car is seen not honouring it, that claim is withdrawn
+   * rather than dressed up: the window is still *set*, it is simply not what
+   * the car is doing, and the row underneath says what to press about it.
+   *
+   * Proof only. A hint from this phone lights its own segment and says so in
+   * its own row; it does not get to overwrite the reading above it or paint it
+   * as a warning. Warning colour on this dashboard means the car is doing
+   * something, and a remembered command is not the car doing anything.
    */
-  const ignoringSchedule = chargeType === 'immediate' && savedStart !== null
+  const ignoringSchedule = observed === 'immediate'
 
   /*
    * Open says the clock is inside the window, which is not the same claim as
@@ -265,9 +297,7 @@ export function ChargeWindowWidget({ commands, state }: { commands: Commands; st
   const showOpen = open && !ignoringSchedule
 
   const meta = ignoringSchedule
-    ? observed
-      ? 'Charging now, outside the window'
-      : 'Set to charge now — the window is stored but unused'
+    ? 'Charging now, outside the window'
     : span === 0
       ? 'Start and stop are the same'
       : until !== null

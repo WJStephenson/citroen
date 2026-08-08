@@ -571,10 +571,28 @@ the inference is deliberately one-sided:
 
 With no proof either way the switch shows this device's own last command, said
 as such ("Set to charge now from this phone"), and with neither it says the type
-is not reported rather than lighting a side at random. That hint lives in
-component state and dies with the session — a hint that outlives the session it
-was made in is indistinguishable from a reading, which is the mistake the
-paragraph above this one is about.
+is not reported rather than lighting a side at random.
+
+Both of those are held to their evidence, which took two goes to get right:
+
+- **An observation is never written down.** It is true in the present tense
+  only: a car charging outside its window says nothing about the car an hour
+  after it stopped. Remembering one meant a car that had been on immediate went
+  on being described that way long after a start hour had put it back — the
+  first cut of this tile did exactly that, and reported a correctly-deferring
+  car as ignoring its schedule.
+- **The hint retires when the car stops behaving like it.** A car plugged in
+  and *not* charging, outside its window, with room below its limit, is not a
+  car on `IMMEDIATE_CHARGE`. That is weaker evidence than the warning case —
+  a charger with its own schedule looks the same — so it is used only to drop
+  the hint back to "not reported", never to claim `DELAYED_CHARGE`. It also
+  waits for a reading the car has sent *since* the command: the car takes
+  30–90s to act, so the reading on screen when you press is from before you
+  pressed, and retiring on that would kill every hint the moment it was made.
+
+The hint lives in component state and dies with the session — one that outlives
+the session it was made in is indistinguishable from a reading, which is the
+mistake the paragraph above this one is about.
 
 ---
 
@@ -667,6 +685,12 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   charge-type transitions were then run end to end against the mock, including
   the one that confuses: setting a start hour on a car charging outside the new
   window pauses the charge.
+- The tile was then driven through the state changes in a real browser, not just
+  rendered: a car seen ignoring its window and then stopping (the observation is
+  not remembered), a command from this phone surviving both the reading it was
+  made against and a re-render of it, the same command retired by the next
+  reading that disagrees, a full car retiring nothing because it proves nothing,
+  and proof overriding a hint that contradicts it.
 - The tile was rasterised at 300, 340 and 420px to confirm the charge-type row
   drops to its own line rather than breaking "Charge now" across two.
 - The charting was re-checked at 64 sessions, not just the six the mock ships:

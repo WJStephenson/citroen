@@ -156,10 +156,19 @@ export default function App() {
    * A car that reports no timestamp at all cannot be judged, and is not
    * accused — see the notice below, which says that instead of guessing.
    */
-  const wakeError = commands.outcomeFor('wake')?.tone === 'error'
+  const wakeOutcome = commands.outcomeFor('wake')
   const reportedAt = vehicle.state?.reportedAt ?? null
   const reportedAgeMs = reportedAt === null ? null : Date.now() - reportedAt.getTime()
   const stale = reportedAgeMs !== null && reportedAgeMs > STALE_AFTER_MINUTES * 60_000
+
+  /*
+   * Whether ⟳ should offer a wake-up instead of a read. Only when the car is
+   * demonstrably quiet — a car that reports no timestamp at all is not
+   * evidence of anything, and treating it as stale would turn the refresh
+   * button into a wake-up button permanently, on a payload shape that may
+   * simply not carry `updated_at`.
+   */
+  const needsWake = stale && waking === null
 
   /*
    * The canonical layout, which is also the fallback order and the order a
@@ -242,11 +251,13 @@ export default function App() {
             last managed to get through.
           */}
           <p className={`app-bar-sub ${stale ? 'is-stale' : ''}`}>
-            {vehicle.refreshing
-              ? 'Refreshing…'
-              : reportedAt
-                ? `Car reported ${relativeTime(reportedAt)}`
-                : `Read ${relativeTime(vehicle.fetchedAt)}`}
+            {waking !== null
+              ? 'Waking — the car answers within about 90 seconds'
+              : vehicle.refreshing
+                ? 'Refreshing…'
+                : reportedAt
+                  ? `Car reported ${relativeTime(reportedAt)}`
+                  : `Read ${relativeTime(vehicle.fetchedAt)}`}
           </p>
         </div>
         <div className="app-bar-actions">
@@ -261,15 +272,21 @@ export default function App() {
               <LayoutIcon />
             </button>
           )}
-          {/* No confirmation: this reads Stellantis's record and never
-              touches the car. The one that does is offered below, and only
-              when the reading is old enough for it to be worth anything. */}
+          {/*
+            One button for "get me something newer", which is two different
+            acts depending on what is wrong. Normally it re-reads: free,
+            instant, no confirmation, because it never touches the car. Once
+            the car has gone quiet past STALE_AFTER_MINUTES, re-reading
+            provably cannot help — the record it reads is the one already on
+            screen — and the only thing that can is a wake-up, so the button
+            offers that instead and says what it costs first.
+          */}
           <button
             type="button"
             className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
-            onClick={() => void vehicle.refresh()}
-            disabled={vehicle.refreshing}
-            aria-label="Re-read vehicle state"
+            onClick={() => (needsWake ? setConfirmWakeOpen(true) : void vehicle.refresh())}
+            disabled={vehicle.refreshing || commands.active !== null}
+            aria-label={needsWake ? 'Wake the car for a fresh reading' : 'Re-read vehicle state'}
           >
             <RefreshIcon />
           </button>
@@ -321,6 +338,19 @@ export default function App() {
         )
       )}
 
+      {/*
+        Every other command reports on the tile that sent it. A wake-up is sent
+        from the app bar, which has no room for a reason, so its failures come
+        out here — and they have to land somewhere visible: the two ways a wake
+        fails are the bridge's rate limit and a car that will not answer, and
+        both look exactly like nothing happening.
+      */}
+      {wakeOutcome?.tone === 'error' && (
+        <div className="banner is-error" role="alert">
+          {wakeOutcome.message}
+        </div>
+      )}
+
       <main className="content">
         {vehicle.loading && !state ? (
           <div className="skeleton" aria-label="Loading vehicle state">
@@ -330,42 +360,6 @@ export default function App() {
         ) : state ? (
           <>
             <CarHero />
-            {/*
-              Only shown once the reading is old enough that a wake-up is the
-              only thing that would help — which is the same moment the offer
-              becomes worth its cost. A fresh car needs no note and no button:
-              the header already says when it spoke, and there is nothing here
-              to fix.
-            */}
-            {(stale || reportedAt === null || waking !== null) && (
-              <div className="reported-at is-stale" role="status">
-                {/*
-                  Every other command reports on the tile that sent it. This
-                  one is sent from here, so it answers here — and it has to,
-                  because a screen that dropped straight back to "reported 3h
-                  ago" would be indistinguishable from a wake-up that silently
-                  failed, and the obvious response to that is to press it
-                  again into a rate limit.
-                */}
-                <span>
-                  {waking !== null
-                    ? 'Waking — the car answers within about 90 seconds'
-                    : reportedAt
-                      ? `Car last reported ${relativeTime(reportedAt)}`
-                      : 'The car has not reported a reading'}
-                </span>
-                {waking === null && (
-                  <button
-                    type="button"
-                    className="button is-quiet is-small"
-                    onClick={() => setConfirmWakeOpen(true)}
-                    disabled={commands.active !== null}
-                  >
-                    {wakeError ? 'Try again' : 'Wake the car'}
-                  </button>
-                )}
-              </div>
-            )}
             <WidgetGrid
               items={widgets}
               editing={editingLayout}
@@ -398,6 +392,10 @@ export default function App() {
         <WakeConfirmModal
           reportedAgo={reportedAt ? relativeTime(reportedAt) : 'nothing this device has seen'}
           onCancel={() => setConfirmWakeOpen(false)}
+          onReadOnly={() => {
+            setConfirmWakeOpen(false)
+            void vehicle.refresh()
+          }}
           onConfirm={() => {
             setConfirmWakeOpen(false)
             void wake()

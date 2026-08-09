@@ -33,8 +33,8 @@ boot a car that has been quiet for a while and watch the dashboard say so.
     python mock/mock_psacc.py --fast      # no artificial wake-up delay
     python mock/mock_psacc.py --flaky     # ~25% of commands fail, for error paths
     python mock/mock_psacc.py --silent-for 180
-                                          # car last reported 3h ago: the stale
-                                          # notice and its wake-up button
+                                          # car last reported 3h ago: the amber
+                                          # header and ⟳'s wake-up offer
     python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with a
                                           # schedule stored and ignored
 
@@ -540,7 +540,7 @@ def main() -> None:
         metavar="MIN",
         help=(
             "boot a car that last reported this many minutes ago -- the ordinary "
-            "state of a parked car, and the one the stale notice exists for"
+            "state of a parked car, and the one the staleness warning exists for"
         ),
     )
     parser.add_argument(

@@ -1,6 +1,8 @@
 interface Props {
   onConfirm: () => void
   onCancel: () => void
+  /** The cheap thing, kept reachable — see the note on the third action. */
+  onReadOnly: () => void
   /** "6h ago" — the reason the button was offered, repeated where it is spent. */
   reportedAgo: string
 }
@@ -9,18 +11,17 @@ interface Props {
  * Confirms a wake-up: an MQTT remote command that brings the car's ECUs up so
  * it uploads a fresh reading (api/client.ts::wakeVehicle).
  *
- * This modal used to guard the ⟳ button, on the belief that an ordinary
- * refresh woke the car. It did not — refreshing reads a record Stellantis is
- * already holding, and confirming it taught the wrong lesson twice over: that
- * looking at the car costs something, and that the cost had been paid. So the
- * confirmation moved to the call that genuinely draws on the 12V battery, and
- * the ⟳ button lost its.
+ * Reached from ⟳, and only once the car has been quiet long enough that a
+ * re-read cannot help. That is the whole reason this is a dialog rather than
+ * the button's plain behaviour: refreshing is free and instant and needs no
+ * permission, while this draws on the 12V battery, so the one moment the two
+ * swap places is the moment to say what changed.
  *
  * The car's silence is named here rather than the wake's cost alone, because
  * that is the decision being made: a reading this old is the only thing a
- * wake-up can fix, and if it is not old, there is nothing here worth spending.
+ * wake-up can fix, and if it is not old, this dialog does not appear.
  */
-export function WakeConfirmModal({ onConfirm, onCancel, reportedAgo }: Props) {
+export function WakeConfirmModal({ onConfirm, onCancel, onReadOnly, reportedAgo }: Props) {
   return (
     <div className="sheet-backdrop" onClick={onCancel} role="presentation">
       <div
@@ -37,9 +38,19 @@ export function WakeConfirmModal({ onConfirm, onCancel, reportedAgo }: Props) {
           of a car that has gone quiet, and the only thing in this app that touches it.
         </p>
         <p className="note">It takes up to 90 seconds, and Stellantis rate-limits it.</p>
+        {/*
+          Three actions rather than two, because ⟳ is the only refresh in the
+          app: without "Re-read" there would be no way left to ask for a plain
+          reading while the car is quiet, and the case where that is worth
+          having is real — a car that reported four minutes ago, on a poll
+          interval of five, is quiet by the clock and about to answer for free.
+        */}
         <div className="sheet-actions">
           <button type="button" className="button is-quiet" onClick={onCancel}>
             Cancel
+          </button>
+          <button type="button" className="button is-quiet" onClick={onReadOnly}>
+            Re-read
           </button>
           <button type="button" className="button is-primary" onClick={onConfirm}>
             Wake it

@@ -114,9 +114,9 @@ only — you already have the domain, tunnel, and nginx container.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
   Kept per-device, deliberately — see
   [Shared settings](#shared-settings-across-devices).
-- **Wake the car** — offered under the hero once the car's own reading has gone
-  quiet for two hours, behind a confirm. The only thing in the app that reaches
-  the vehicle, and the only thing that helps when it has stopped reporting; see
+- **Wake the car** — what ⟳ becomes once the car has been quiet for two hours,
+  behind a confirm. The only thing in the app that reaches the vehicle, and the
+  only thing that helps when it has stopped reporting; see
   [Battery safety](#battery-safety-and-what-a-read-actually-costs).
 - **App lock** — WebAuthn biometrics or a local PIN, re-armed when the app has
   been backgrounded for over a minute.
@@ -163,7 +163,7 @@ python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with 23:00�
                                       # stored: a schedule reported but ignored
 python mock/mock_psacc.py --silent-for 180
                                       # a car that last reported three hours ago:
-                                      # the stale notice and its wake-up button
+                                      # the amber header and ⟳'s wake-up offer
 ```
 
 Reads never move the car's `updated_at` here, because they do not on the real
@@ -317,12 +317,19 @@ What that changes:
   `deploy/charge_notify.py`, which runs on the server.
 - **Returning to the app only refetches if the last read has aged out.**
   Foregrounding ten times in a minute is one read, not ten.
-- **The ⟳ button carries no confirmation** any more. It never woke anything,
-  and confirming it taught that looking at the car costs something.
-- **"Wake the car" is the one action that spends the 12V battery**, and the
-  only one that can help a car that has genuinely gone quiet. It appears under
-  the hero when the reading passes `STALE_AFTER_MINUTES`, behind a confirm, and
-  Stellantis rate-limits it.
+- **⟳ is one button for "get me something newer", and that is two different
+  acts.** Normally it re-reads: free, instant, no confirmation, because it
+  never touches the car. Once the reading passes `STALE_AFTER_MINUTES` a
+  re-read provably cannot help — the record it would read is the one already on
+  screen — so the button offers a wake-up instead and says what that costs
+  first. The dialog keeps a plain **Re-read** alongside it, because ⟳ is the
+  app's only refresh and a car quiet by the clock may still be about to answer
+  for free.
+- **The wake-up is the one action that spends the 12V battery**, and the only
+  one that can help a car that has genuinely gone quiet. Stellantis rate-limits
+  it; the app bar holds "Waking" through the ~90s before the answer lands, and
+  a rate limit or a car that will not answer surfaces as a banner rather than
+  as nothing happening.
 - Set `-R 5` on the bridge as well (`deploy/docker-compose.psa.yml`). It keeps
   `car.status` warm for the Android widget's cold starts and for anything else
   reading the bridge, at no cost to the car.
@@ -337,7 +344,7 @@ aged, which is the only way a dashboard can be wrong without ever displaying a
 wrong number.
 
 Both surfaces now measure the car's own timestamp (`reportedAt`, from the
-payload's `updated_at`): `App.tsx` in the header and the stale notice, and the
+payload's `updated_at`): `App.tsx` in the header and the charge tile, and the
 Android widget in `ChargeReading.asOf`. Our read time appears in exactly two
 places — when the car has never given a timestamp, and in the offline banner,
 where the question really is when this device last got through.
@@ -538,8 +545,8 @@ UI does not use them.
 `/wakeup/{VIN}` used to be on this list. It is now the "Wake the car" action —
 the app's only call that reaches the vehicle, and the only answer when the car
 has stopped reporting, since no amount of reading produces a reading the car
-never sent. It sits behind a confirm and appears only once the data is old
-enough for it to be worth anything. Stellantis rate-limits it, which the bridge
+never sent. It sits behind a confirm, which ⟳ raises only once the data is old
+enough for a wake to be worth anything. Stellantis rate-limits it, which the bridge
 reports as `{"error": "Wakeup rate limit exceeded"}` with an HTTP 200 — the
 same success-shaped failure `charge_control` uses, and handled by the same
 check.

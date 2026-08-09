@@ -22,10 +22,15 @@ import java.net.URI
  * authentication of its own. A token that can reach /preconditioning or
  * /lock_door is a car key on the lock screen. See deploy/DEPLOYMENT.md.
  *
- * `?from_cache=1` is not an optimisation here, it is the whole safety story:
- * it reads psa_car_controller's stored state and never wakes the car, so a
- * widget refreshing every 15 minutes costs the 12V battery nothing. A widget on
- * the live endpoint would undo MIN_POLL_MINUTES and everything it protects.
+ * The read is uncached, and used not to be. `?from_cache=1` was here as a
+ * safety story — never wake the car — but no read wakes the car: without the
+ * flag the bridge asks Stellantis for the status record they hold, and only
+ * `/wakeup` reaches the vehicle (see src/api/client.ts::fetchVehicleState).
+ * What the flag actually bought was psa_car_controller's in-memory copy, which
+ * nothing refreshes unless the bridge runs with -R. A home-screen widget
+ * re-reading that every fifteen minutes is fifteen-minute-fresh proof that
+ * nothing has changed, which is how the most glanceable surface in the house
+ * came to be the least current.
  */
 internal object ChargeRepository {
 
@@ -54,8 +59,7 @@ internal object ChargeRepository {
     if (!isConfigured()) return previous.copy(failure = ChargeReading.Failure.NOT_CONFIGURED)
 
     val url = URI(
-      "https://${context.getString(R.string.host)}/api/get_vehicleinfo/" +
-        "${BuildConfig.VIN}?from_cache=1",
+      "https://${context.getString(R.string.host)}/api/get_vehicleinfo/${BuildConfig.VIN}",
     ).toURL()
 
     var connection: HttpURLConnection? = null

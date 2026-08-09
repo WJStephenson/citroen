@@ -42,6 +42,13 @@ export interface Commands {
     /** Applied immediately; rolled back if the bridge rejects the command. */
     optimistic?: Partial<VehicleState>
     send: () => Promise<CommandResult>
+    /**
+     * How long to leave the car before reading back, when the default is too
+     * short. A wake-up is the case that needs it: the whole point of the
+     * command is the reading that follows, and the ECUs take up to 90s to come
+     * up and upload (config.EXPECTED_WAKE_SECONDS).
+     */
+    settleMs?: number
   }) => Promise<boolean>
 }
 
@@ -60,7 +67,7 @@ export interface Commands {
  */
 export function useCommands(
   patch: (changes: Partial<VehicleState>) => void,
-  refresh: (options?: { live?: boolean }) => Promise<void>,
+  refresh: () => Promise<void>,
   current: VehicleState | null,
 ): Commands {
   const [active, setActive] = useState<ActiveCommand | null>(null)
@@ -120,7 +127,7 @@ export function useCommands(
   )
 
   const run = useCallback<Commands['run']>(
-    async ({ kind, label, optimistic, send }) => {
+    async ({ kind, label, optimistic, send, settleMs = 15_000 }) => {
       // One command at a time: two overlapping wake-ups confuse both the user
       // and the car.
       if (active) return false
@@ -142,9 +149,8 @@ export function useCommands(
         const result = await send()
         report(kind, 'ok', result.message)
         // The car acts after the acknowledgement, so give it a moment before
-        // asking for real state — and read it live, since the bridge's cache
-        // will not yet reflect what we just asked for.
-        window.setTimeout(() => void refresh({ live: true }), 15_000)
+        // asking for real state.
+        window.setTimeout(() => void refresh(), settleMs)
         return true
       } catch (caught) {
         if (Object.keys(rollback).length) patch(rollback)

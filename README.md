@@ -114,10 +114,10 @@ only — you already have the domain, tunnel, and nginx container.
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
   Kept per-device, deliberately — see
   [Shared settings](#shared-settings-across-devices).
-- **Pull-to-refresh** — the primary way to get live state, because background
-  polling is deliberately throttled (see [Battery safety](#battery-safety)). It
-  stands down while the settings sheet is open or the grid is being rearranged,
-  since those want the same downward drag.
+- **Wake the car** — offered under the hero once the car's own reading has gone
+  quiet for two hours, behind a confirm. The only thing in the app that reaches
+  the vehicle, and the only thing that helps when it has stopped reporting; see
+  [Battery safety](#battery-safety-and-what-a-read-actually-costs).
 - **App lock** — WebAuthn biometrics or a local PIN, re-armed when the app has
   been backgrounded for over a minute.
 - **Offline launch** — cache-first service worker; the shell opens instantly
@@ -161,7 +161,14 @@ python mock/mock_psacc.py --flaky     # fail ~25% of commands, to test error pat
 python mock/mock_psacc.py --charging  # start plugged in and charging
 python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with 23:00–07:00
                                       # stored: a schedule reported but ignored
+python mock/mock_psacc.py --silent-for 180
+                                      # a car that last reported three hours ago:
+                                      # the stale notice and its wake-up button
 ```
+
+Reads never move the car's `updated_at` here, because they do not on the real
+bridge either — only the car reporting does, and `/wakeup` is what asks it to.
+A parked mock car sits as still as a parked real one.
 
 The mock models the charge *type* as well as the hours, since the two together
 are what make a deferred start work or silently not (see [The design doc's API
@@ -278,23 +285,66 @@ browser chrome. Requires HTTPS, which the tunnel already provides.
 
 ---
 
-## Battery safety
+## Battery safety, and what a read actually costs
 
-The doc's §5 constraint drives real behaviour in the code, not just a comment:
+The doc's §5 constraint is real, but for most of this app's life it was applied
+to the wrong call — at a cost the constraint was supposed to prevent paying.
 
-- **Background polls read the bridge's cache** (`?from_cache=1`) and never wake
-  the car. Only a deliberate pull-to-refresh, the ⟳ button, or the follow-up
-  after a command does a live read.
-- **Background polling is floored at 20 minutes** (`config.ts:MIN_POLL_MINUTES`).
-  The Settings slider cannot go below it. Excessive polling holds the car's ECUs
-  awake and flattens the 12V auxiliary battery — a no-start, not an
-  inconvenience.
-- **Polling stops entirely when the app is not visible.** A PWA left open in the
-  background costs nothing.
-- **Returning to the app only refetches if the data is actually stale.**
-  Foregrounding ten times in a minute is one poll, not ten.
-- **Pull-to-refresh is the primary path** to live state, as the doc intends.
+**Reading does not wake the car.** Verified in upstream's source, not the doc:
+
+| Call | What it does | Touches the car |
+| --- | --- | --- |
+| `get_vehicleinfo?from_cache=1` | returns PSACC's in-memory `car.status` | no |
+| `get_vehicleinfo` | PSACC calls `VehiclesApi.get_vehicle_status` — an HTTPS read of the record **Stellantis** holds | no |
+| `wakeup/{VIN}` | `RemoteClient.wakeup`, an MQTT command to the vehicle | **yes** |
+
+Upstream settles the question itself: `RemoteClient._fix_not_updated_api` has to
+call `wakeup()` to make a car report a charge the status API missed. If reading
+the status refreshed anything, it would not need to.
+
+What that changes:
+
+- **Every background read is uncached** and costs a round trip to Stellantis,
+  nothing more. The cached read was worse in the only way that matters: nothing
+  refreshes `car.status` unless the bridge runs with `-R` or `-c`
+  (`psacc/application/car_controller.py`), so polling it was re-reading one
+  frozen number on a timer and calling the result fresh.
+- **The poll floor is 5 minutes** (`config.ts:MIN_POLL_MINUTES`), and it is
+  there to be a polite guest on someone else's API. Upstream polls the same
+  endpoint every 120s under charge control.
+- **Polling stops entirely when the app is not visible.** Nobody reads a
+  backgrounded dashboard, and the overnight charge notification comes from
+  `deploy/charge_notify.py`, which runs on the server.
+- **Returning to the app only refetches if the last read has aged out.**
+  Foregrounding ten times in a minute is one read, not ten.
+- **The ⟳ button carries no confirmation** any more. It never woke anything,
+  and confirming it taught that looking at the car costs something.
+- **"Wake the car" is the one action that spends the 12V battery**, and the
+  only one that can help a car that has genuinely gone quiet. It appears under
+  the hero when the reading passes `STALE_AFTER_MINUTES`, behind a confirm, and
+  Stellantis rate-limits it.
+- Set `-R 5` on the bridge as well (`deploy/docker-compose.psa.yml`). It keeps
+  `car.status` warm for the Android widget's cold starts and for anything else
+  reading the bridge, at no cost to the car.
 - The 12V voltage is shown in the status strip and turns amber below 12.0V.
+
+### Staleness is the car's silence, not ours
+
+The dashboard used to headline `fetchedAt` — when the app last managed to read
+— which is a fact about the app and is by construction a few minutes old. It
+therefore read "Updated 2 min ago" all day while the numbers underneath it
+aged, which is the only way a dashboard can be wrong without ever displaying a
+wrong number.
+
+Both surfaces now measure the car's own timestamp (`reportedAt`, from the
+payload's `updated_at`): `App.tsx` in the header and the stale notice, and the
+Android widget in `ChargeReading.asOf`. Our read time appears in exactly two
+places — when the car has never given a timestamp, and in the offline banner,
+where the question really is when this device last got through.
+
+`mock/mock_psacc.py` models this properly now: reads never move `updated_at`,
+only the car does, and `--silent-for 180` boots a car that last spoke three
+hours ago.
 
 ---
 
@@ -350,7 +400,7 @@ four endpoints do not exist as written:
 
 | Design doc §3.1 | Reality |
 |---|---|
-| `GET /get_vehicleinfo/{VIN}` | correct — plus `?from_cache=1` |
+| `GET /get_vehicleinfo/{VIN}` | correct — plus `?from_cache=1`, which does *not* mean what the doc implies: [neither form reaches the car](#battery-safety-and-what-a-read-actually-costs) |
 | `GET /preconditioning/{VIN}/{0\|1}` | correct |
 | `GET /charge_control/{VIN}?single_threshold=` | **wrong twice** — VIN is a *query* param and the key is `percentage`: `/charge_control?vin=…&percentage=80` |
 | `GET /charge_control/{VIN}?hour=&minute=` | **wrong endpoint** — that sets the *stop* hour. Deferred *start* is `/charge_hour?vin=…&hour=&minute=` |
@@ -430,10 +480,13 @@ Two more behaviours worth knowing:
   returns `{"error": "VIN not in list"}` — **with HTTP 200**. The client checks
   for an `error` key in the body precisely because a success status is not a
   success here.
-- **`from_cache=1` reads stored state without waking the car.** Background polls
-  use it; pull-to-refresh and the ⟳ button omit it for a live read. This matters
-  more than the poll interval for 12V battery drain — a cached poll costs the
-  car nothing at all.
+- **`from_cache=1` is not the difference between waking the car and not.**
+  Neither form of the call reaches the vehicle; the flag chooses between
+  PSACC's frozen copy and a read of Stellantis's record. Nothing in this app
+  sends it any more — see
+  [Battery safety](#battery-safety-and-what-a-read-actually-costs) for the
+  whole story, which is the single most consequential thing the design doc got
+  wrong.
 
 ### The charging curve is not available, and `kw` is not kilowatts
 
@@ -481,6 +534,15 @@ Two caveats:
 
 `/position/{VIN}` and `/get_vehicles` are outside the design doc's scope, so the
 UI does not use them.
+
+`/wakeup/{VIN}` used to be on this list. It is now the "Wake the car" action —
+the app's only call that reaches the vehicle, and the only answer when the car
+has stopped reporting, since no amount of reading produces a reading the car
+never sent. It sits behind a confirm and appears only once the data is old
+enough for it to be worth anything. Stellantis rate-limits it, which the bridge
+reports as `{"error": "Wakeup rate limit exceeded"}` with an HTTP 200 — the
+same success-shaped failure `charge_control` uses, and handled by the same
+check.
 
 `/battery/soh/{VIN}` used to be on this list and now feeds the Battery health
 tile. It is read defensively, because unlike the routes above it its response
@@ -637,15 +699,17 @@ APK, not a view of it — it makes its own request, with its own credential:
   `/api/get_vehicleinfo` alone. It lives in an APK on a phone, and the bridge
   behind it has no authentication of its own — a token that could also reach
   `/preconditioning` is a car key on the lock screen.
-- **`?from_cache=1`**, so the 15-minute refresh reads the bridge's stored state
-  and never wakes the car. A widget on the live endpoint would quietly undo
-  [Battery safety](#battery-safety).
+- **An uncached read**, every 15 minutes. It used to send `?from_cache=1` on
+  the grounds that this never wakes the car — true, and true of the uncached
+  read as well, which is the point. What the flag bought was PSACC's frozen
+  copy, so the most glanceable surface in the house was the least current one.
 
 Its readings are held to the same standard as the tiles': a failed refresh
 keeps the last good number and says why it is old rather than blanking, the
 ring uses the same three severity colours as the charge tile, and a reading
-older than 45 minutes says its age instead of its range — the same threshold
-`App.tsx` calls stale.
+older than two hours says its age instead of its range — measured, like the web
+app, on the car's own timestamp (`ChargeReading.asOf`) rather than on when the
+widget last fetched.
 
 Nothing about the web app depends on any of this. `npm run build` neither knows
 nor cares that `android/` exists; the only thing the two share is
@@ -765,8 +829,22 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   rasterising the tile, which is how the axis collision between a selected label
   and a scheduled one was found and fixed.
 
-Not verified: real-device install and the WebAuthn lock (both need a real
-browser on HTTPS), the nginx config against a live psa_car_controller, and the
-exact JSON your car returns — `get_vehicleinfo` passes through the Stellantis
+- The read/wake distinction was traced through upstream's own source rather
+  than inferred from the doc: `web/view/api.py`'s `get_vehicle_info` into
+  `PSAClient.get_vehicle_info` (a `VehiclesApi.get_vehicle_status` call, or
+  `car.status` when cached) versus `/wakeup` into `RemoteClient.wakeup`'s MQTT
+  publish; and `car_controller.py`'s `start_remote_control`, which reaches
+  `start_refresh_thread` only under `-R` or `-c` — the reason an untouched
+  bridge's cached reading can be arbitrarily old.
+- The mock was driven to confirm it: repeated reads of both kinds leave
+  `updated_at` where it was, and `/wakeup` is the only GET that moves it.
+
+Not verified: the Android unit tests, which cannot resolve the Gradle Android
+plugin in this environment and run in CI instead (`./gradlew test`); the
+timings above against a live bridge — the read/wake behaviour is established
+from upstream's source, and what remains open is how often *your* car chooses
+to report, which is the thing none of this can change; real-device install and
+the WebAuthn lock (both need a real browser on HTTPS); the nginx config against
+a live psa_car_controller; and the exact JSON your car returns — `get_vehicleinfo` passes through the Stellantis
 v4 status object, whose fields vary by trim and firmware. `normalise()` is
 written to tolerate that, but check the real payload on first run.

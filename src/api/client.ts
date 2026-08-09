@@ -7,6 +7,7 @@
  * psa_car_controller/web/view/api.py:
  *
  *   /get_vehicleinfo/<vin>?from_cache=1
+ *   /wakeup/<vin>
  *   /preconditioning/<vin>/<0|1>
  *   /charge_control?vin=&percentage=          <- VIN is a QUERY param
  *   /charge_control?vin=&hour=&minute=        <- sets the STOP hour
@@ -31,12 +32,22 @@ import {
 
 export const endpoints = {
   /**
-   * from_cache=1 returns psa_car_controller's last known state without
-   * contacting the car. Background polls use it so a parked car is never woken
-   * on a timer; manual refresh omits it to force a live read.
+   * from_cache=1 returns psa_car_controller's own in-memory copy; omitting it
+   * asks Stellantis for the car's current status record.
+   *
+   * Neither one reaches the car — see fetchVehicleState. The cache is the
+   * cheaper of the two and the staler, since nothing refreshes it unless the
+   * bridge was started with -R (deploy/docker-compose.psa.yml) or somebody
+   * makes an uncached read.
    */
   vehicleInfo: (vin: string, fromCache = false) =>
     `/get_vehicleinfo/${encodeURIComponent(vin)}${fromCache ? '?from_cache=1' : ''}`,
+  /**
+   * The only call in this file that reaches the vehicle: an MQTT remote
+   * command asking its ECUs to wake and report to Stellantis. Everything else
+   * reads a record somebody else is already holding.
+   */
+  wakeup: (vin: string) => `/wakeup/${encodeURIComponent(vin)}`,
   preconditioning: (vin: string, on: boolean) =>
     `/preconditioning/${encodeURIComponent(vin)}/${on ? 1 : 0}`,
   /** Local PSACC charge-control config — requires charge control set up in PSACC. */
@@ -295,20 +306,40 @@ export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
 }
 
 /**
- * `fromCache` reads psa_car_controller's stored state instead of waking the
- * car. Background polling passes true; pull-to-refresh passes false.
+ * Reads the car's current state. Neither branch of `fromCache` touches the
+ * vehicle, which is not what this app believed for most of its life and is
+ * worth spelling out, because the belief cost real freshness:
  *
- * Charge-control state is fetched alongside it every time, cache flag or
- * not — it's a local bridge read (see fetchChargeControlState), not a call
- * to the car, so it carries none of the wake-up cost that flag exists to
- * avoid. Both requests are awaited together: a failure in either fails the
- * whole poll rather than risk half-updating the UI with one true reading and
- * one stale one.
+ *   from_cache=1  ->  PSAClient.get_vehicle_info returns `car.status`, the
+ *                     copy the bridge already holds in memory. Instant, free,
+ *                     and refreshed by nothing at all unless the bridge is
+ *                     running its own refresh thread — which it only starts
+ *                     under -R or -c (psacc/application/car_controller.py).
+ *   from_cache=0  ->  the same method calls VehiclesApi.get_vehicle_status,
+ *                     an HTTPS read of the status record *Stellantis* holds.
+ *                     It costs a round trip to their servers and nothing else.
+ *
+ * The car is only ever reached by a remote command over MQTT, and the one
+ * that asks it to report is `/wakeup` — see wakeVehicle. Upstream proves the
+ * distinction itself: RemoteClient._fix_not_updated_api has to call wakeup()
+ * to make a car report a charge the status API missed, which it would never
+ * need if reading the status refreshed anything.
+ *
+ * So every read here is uncached, and the app no longer has two kinds. The
+ * cache's only advantage was a cost that was never being paid, and its
+ * disadvantage — sitting on a reading nothing is updating — is exactly the
+ * staleness this app kept blaming on the car. `endpoints.vehicleInfo` keeps
+ * the flag because the bridge has it, not because anything here sends it.
+ *
+ * Charge-control state is fetched alongside it every time: that one really is
+ * a local bridge read (see fetchChargeControlState). Both requests are awaited
+ * together, so a failure in either fails the whole poll rather than
+ * half-updating the UI with one true reading and one stale one.
  */
-export async function fetchVehicleState(fromCache = false): Promise<VehicleState> {
+export async function fetchVehicleState(): Promise<VehicleState> {
   const vin = requireVin()
   const [raw, chargeControl] = await Promise.all([
-    request<RawVehicleInfo>(endpoints.vehicleInfo(vin, fromCache), READ_TIMEOUT_MS),
+    request<RawVehicleInfo>(endpoints.vehicleInfo(vin), READ_TIMEOUT_MS),
     fetchChargeControlState(),
   ])
   return {
@@ -346,6 +377,27 @@ async function command(path: string, success: string): Promise<CommandResult> {
   }
 
   return { ok: true, message: success }
+}
+
+/**
+ * Asks the car to wake up and report to Stellantis.
+ *
+ * This is the one thing in the app that spends the 12V battery to get a
+ * number, and the only answer when the car has genuinely gone quiet — no
+ * amount of reading gives you a reading the car never sent. It is offered
+ * behind a confirmation, and only where the dashboard has already shown that
+ * the data is old (see App.tsx).
+ *
+ * Stellantis rate-limits it. The bridge reports that as {"error": "Wakeup
+ * rate limit exceeded"} with an HTTP 200, which `command` already recognises.
+ *
+ * Waking is not the same as reporting: the ECUs come up, upload, and the new
+ * state appears on the *next* read, which is why this goes through
+ * useCommands like any other command and lets its follow-up poll fetch the
+ * result.
+ */
+export function wakeVehicle(): Promise<CommandResult> {
+  return command(endpoints.wakeup(requireVin()), 'Wake-up sent — the car will report shortly')
 }
 
 export function setPreconditioning(on: boolean): Promise<CommandResult> {

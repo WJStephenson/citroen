@@ -188,8 +188,10 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
           />
         </label>
         <p className="note">
-          Polling below {MIN_POLL_MINUTES} minutes keeps the car's ECUs awake and flattens the 12V
-          battery. Pull down on the dashboard whenever you want live state.
+          Background reads ask Stellantis what the car last told them, and never touch the car
+          itself — the floor of {MIN_POLL_MINUTES} minutes is there to stay a polite guest on
+          their API, not to protect the 12V battery. Only “Wake the car”, offered on the dashboard
+          when a reading has gone old, reaches the vehicle.
         </p>
 
         <h3>Notifications</h3>

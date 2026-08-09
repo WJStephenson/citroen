@@ -10,11 +10,11 @@ app is backgrounded, to protect the car's 12V battery, so it cannot be the
 thing that notices a charge finishing overnight; nobody has the tab open
 then. This is a separate, always-running loop instead.
 
-Two things are read every POLL_SECONDS, both local bridge reads that never
-wake or touch the car:
+Two things are read every POLL_SECONDS, neither of which touches the car:
 
-  - GET {PSACC_URL}/get_vehicleinfo/{vin}?from_cache=1
-    battery level and charging status, as reported by the car.
+  - GET {PSACC_URL}/get_vehicleinfo/{vin}
+    battery level and charging status, as last reported by the car to
+    Stellantis. Uncached deliberately — see fetch_charging.
 
   - GET {PSACC_URL}/charge_control?vin={vin}   (no hour/minute/percentage —
     read-only, see get_charge_control in psa_car_controller's api.py)
@@ -136,8 +136,19 @@ def fetch_settings() -> dict:
 
 
 def fetch_charging(vin: str) -> tuple[str | None, float | None]:
-    """(status, level) from get_vehicleinfo, lowercased status."""
-    info = http_get(f"{PSACC_URL}/get_vehicleinfo/{vin}?from_cache=1")
+    """
+    (status, level) from get_vehicleinfo, lowercased status.
+
+    Read WITHOUT from_cache, which it used to use. The cached read returns
+    psa_car_controller's in-memory copy, and nothing refreshes that copy unless
+    the bridge runs with -R or something makes an uncached read. Overnight,
+    with every phone's app backgrounded, nothing did — so this watcher spent
+    the night re-reading one frozen number and could not see the charge it
+    exists to announce. Uncached asks Stellantis instead, which still never
+    touches the car (see src/api/client.ts::fetchVehicleState) and is the
+    difference between watching the car and watching a snapshot of it.
+    """
+    info = http_get(f"{PSACC_URL}/get_vehicleinfo/{vin}")
     energies = info.get("energy") or [{}]
     energy = next((e for e in energies if str(e.get("type", "")).lower() == "electric"), energies[0])
     charging = energy.get("charging") or {}

@@ -255,11 +255,37 @@ button {
   user-select: none;
 }
 
+/*
+ * The car's silence, said once, where the tiles it qualifies begin — and
+ * carrying the only button that can end it. Amber for the same reason the
+ * offline banner is: true, with a caveat, rather than broken.
+ */
 .reported-at {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   margin: 0 0 1.25rem;
   text-align: center;
   font-size: 0.75rem;
   color: var(--muted);
+}
+
+.reported-at.is-stale {
+  color: var(--warn-fg);
+}
+
+.app-bar-sub.is-stale {
+  color: var(--warn-fg);
+}
+
+/* Sits inline in a line of 0.75rem text, so it cannot keep the full control
+   height the tap targets in the grid are built to. */
+.button.is-small {
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  font-size: 0.8125rem;
 }
 
 /* ---------- widget grid ---------- */

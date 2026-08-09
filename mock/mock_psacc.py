@@ -8,6 +8,21 @@ commands sleep 30-90s to imitate the Stellantis SMS wake-up packet, so the PWA's
 async states are actually exercisable without touching the car.
 Standard library only.
 
+The three sources of vehicle state are modelled separately, because conflating
+them is what let the PWA ship a dashboard that was confidently out of date:
+
+    state         what Stellantis holds. Only the CAR changes this, by
+                  reporting -- while charging, while preconditioning, or when
+                  woken. A parked car changes nothing, for hours.
+    bridge_cache  psa_car_controller's `car.status`. A copy taken at the last
+                  uncached read; refreshed by nothing else, exactly as upstream
+                  refreshes nothing else without -R or -c.
+    a read        either of the above, handed over. Never a reason for the car
+                  to say anything new.
+
+So `updated_at` does NOT advance because someone refreshed. Use --silent-for to
+boot a car that has been quiet for a while and watch the dashboard say so.
+
     /get_vehicleinfo/<vin>?from_cache=1
     /preconditioning/<vin>/<0|1>
     /charge_control?vin=&percentage=      (also &hour=&minute= -> STOP hour)
@@ -17,6 +32,9 @@ Standard library only.
     python mock/mock_psacc.py             # listens on 127.0.0.1:5001
     python mock/mock_psacc.py --fast      # no artificial wake-up delay
     python mock/mock_psacc.py --flaky     # ~25% of commands fail, for error paths
+    python mock/mock_psacc.py --silent-for 180
+                                          # car last reported 3h ago: the stale
+                                          # notice and its wake-up button
     python mock/mock_psacc.py --immediate # charging on IMMEDIATE_CHARGE with a
                                           # schedule stored and ignored
 
@@ -54,6 +72,11 @@ state = {
     "updated_at": datetime.now(timezone.utc),
 }
 lock = threading.Lock()
+
+# psa_car_controller's `car.status`: None until something reads uncached, then
+# whatever that read saw, frozen. Upstream falls through to a live read while it
+# is None (`if cache and car.status is not None`), so this does too.
+bridge_cache: dict | None = None
 
 args = argparse.Namespace(
     fast=False,
@@ -123,12 +146,31 @@ def settle_charge() -> None:
     state["charging_status"] = "InProgress" if charging else "Stopped"
     state["charging_mode"] = "Slow" if charging else "No"
     state["remaining_time"] = "PT2H40M" if charging else "PT0M"
+    # A charge starting or stopping is an event the car reports on its own.
+    report()
+
+
+def report() -> None:
+    """
+    The car uploading to Stellantis. Caller holds the lock.
+
+    The only thing that moves `updated_at`, and therefore the only thing that
+    makes the dashboard's "car reported N ago" newer. Reads do not call it.
+    """
     state["updated_at"] = datetime.now(timezone.utc)
 
 
-def vehicle_payload() -> dict:
+def vehicle_payload(from_cache: bool = False) -> dict:
+    global bridge_cache
     with lock:
-        s = dict(state)
+        if from_cache and bridge_cache is not None:
+            s = bridge_cache
+        else:
+            # An uncached read is what refreshes the bridge's copy -- see
+            # PSAClient.get_vehicle_info, which assigns car.status on the way
+            # through.
+            s = dict(state)
+            bridge_cache = s
     return {
         "vin": VIN,
         "energy": [
@@ -264,7 +306,7 @@ def apply_precondition(on: bool) -> None:
     """Cabin warms and the traction battery drains, like the real thing."""
     with lock:
         state["air_conditioning"] = "Enabled" if on else "Disabled"
-        state["updated_at"] = datetime.now(timezone.utc)
+        report()
     if not on:
         return
 
@@ -277,7 +319,7 @@ def apply_precondition(on: bool) -> None:
                 state["cabin_temp"] = min(21.0, state["cabin_temp"] + 1.4)
                 state["level"] = max(0.0, state["level"] - 0.3)
                 state["autonomy"] = max(0, int(state["level"] * 3.45))
-                state["updated_at"] = datetime.now(timezone.utc)
+                report()
 
     threading.Thread(target=warm, daemon=True).start()
 
@@ -308,11 +350,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parts[0] == "get_vehicleinfo":
-            # from_cache=1 answers from stored state without waking the car, so
-            # it is instant. A live read has to reach the vehicle.
-            if query.get("from_cache", ["0"])[0] != "1":
-                time.sleep(0.2 if args.fast else random.uniform(3, 12))
-            self._send(200, vehicle_payload())
+            # Neither branch reaches the car. from_cache=1 hands back the
+            # bridge's own copy and is instant; without it the bridge asks
+            # Stellantis, which costs a round trip to their servers and
+            # nothing else. Note what is missing from both: any reason for the
+            # car to report, and so any change to `updated_at`.
+            from_cache = query.get("from_cache", ["0"])[0] == "1"
+            if not from_cache:
+                time.sleep(0.1 if args.fast else random.uniform(0.6, 2.5))
+            self._send(200, vehicle_payload(from_cache))
             return
 
         if parts[0] == "preconditioning" and len(parts) == 3:
@@ -330,10 +376,18 @@ class Handler(BaseHTTPRequestHandler):
             if "vin" not in query:
                 self._send(400, {"message": "charge_control requires ?vin="})
                 return
-            time.sleep(wake_delay())
-            if args.flaky and random.random() < 0.25:
-                self._send(504, {"message": "Vehicle did not respond to the wake-up request."})
-                return
+            # get_charge_control only mutates when a percentage or an hour is
+            # present; without one it reads PSACC's own config and answers
+            # immediately. Sleeping on that form modelled a wake-up the real
+            # bridge never performs, and since every poll reads it alongside
+            # get_vehicleinfo, it made a routine refresh look like a minute of
+            # waiting on the car.
+            mutating = "percentage" in query or ("hour" in query and "minute" in query)
+            if mutating:
+                time.sleep(wake_delay())
+                if args.flaky and random.random() < 0.25:
+                    self._send(504, {"message": "Vehicle did not respond to the wake-up request."})
+                    return
             if args.no_charge_control:
                 # PSACC returns this with HTTP 200 when charge control is not
                 # configured for the VIN — a success-shaped failure.
@@ -381,8 +435,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"result": "ok", "start_hour": state["start_hour"]})
             return
 
+        # The one route that reaches the vehicle: its ECUs come up and it
+        # uploads, which is why this is the only GET here that moves
+        # `updated_at`. Stellantis rate-limits it, and the bridge reports that
+        # as a 200 carrying an error -- see --rate-limit.
         if parts[0] == "wakeup" and len(parts) == 2:
+            if args.rate_limit:
+                self._send(200, {"error": "Wakeup rate limit exceeded"})
+                return
             time.sleep(wake_delay())
+            with lock:
+                state["aux_voltage"] = round(state["aux_voltage"] - 0.05, 2)
+                report()
             self._send(200, {"result": "ok"})
             return
 
@@ -430,19 +494,29 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def drift() -> None:
-    """Slowly move telemetry so repeated refreshes are not identical."""
+    """
+    A charging car, moving.
+
+    This used to run unconditionally and stamp `updated_at` every 30 seconds,
+    which meant every car in development was a car that had just spoken. The
+    staleness the real one falls into -- parked, quiet, telling nobody anything
+    for hours -- could not be reproduced here, so the dashboard was built and
+    reviewed against a vehicle that does not exist. A parked car now sits
+    exactly as still as the real one, and its numbers stay put.
+    """
     while True:
         time.sleep(30)
         with lock:
-            if state["charging_status"] == "InProgress":
-                state["level"] = min(100.0, state["level"] + 0.6)
-                state["autonomy"] = int(state["level"] * 3.45)
-                if state["level"] >= 100:
-                    state["charging_status"] = "Finished"
-                    state["remaining_time"] = "PT0M"
+            if state["charging_status"] != "InProgress":
+                continue
+            state["level"] = min(100.0, state["level"] + 0.6)
+            state["autonomy"] = int(state["level"] * 3.45)
+            if state["level"] >= 100:
+                state["charging_status"] = "Finished"
+                state["remaining_time"] = "PT0M"
             state["cabin_temp"] += random.uniform(-0.2, 0.2)
             state["aux_voltage"] = round(random.uniform(12.2, 12.7), 2)
-            state["updated_at"] = datetime.now(timezone.utc)
+            report()
 
 
 def main() -> None:
@@ -457,7 +531,17 @@ def main() -> None:
     parser.add_argument(
         "--rate-limit",
         action="store_true",
-        help="always return the rate-limit error for horn/lights/lock_door",
+        help="always return the rate-limit error for horn/lights/lock_door/wakeup",
+    )
+    parser.add_argument(
+        "--silent-for",
+        type=int,
+        default=0,
+        metavar="MIN",
+        help=(
+            "boot a car that last reported this many minutes ago -- the ordinary "
+            "state of a parked car, and the one the stale notice exists for"
+        ),
     )
     parser.add_argument(
         "--immediate",
@@ -484,11 +568,18 @@ def main() -> None:
         state["start_hour"] = "23:00"
         state["stop_hour"] = "07:00"
 
+    if args.silent_for:
+        state["updated_at"] = datetime.now(timezone.utc) - timedelta(minutes=args.silent_for)
+
     threading.Thread(target=drift, daemon=True).start()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"mock psa_car_controller on http://127.0.0.1:{args.port}  (VIN {VIN})")
     print(f"  wake-up delay: {'off' if args.fast else '30-90s'}   flaky: {args.flaky}")
+    print(
+        f"  last reported: {args.silent_for} min ago"
+        f"{'   (reads will not change this -- only /wakeup will)' if args.silent_for else ''}"
+    )
     print(
         f"  charge type: {state['charge_type']}   window: "
         f"{state['start_hour']}-{state['stop_hour']}   status: {state['charging_status']}"

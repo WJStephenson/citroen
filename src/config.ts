@@ -58,8 +58,9 @@ export function getVin(): string {
   return typeof raw === 'string' && raw ? raw : (import.meta.env.VITE_VIN ?? '')
 }
 
-export function setVin(vin: string): void {
-  patchSharedSettings({ vin: vin.trim().toUpperCase() })
+/** Resolves once the store has it — see patchSharedSettings. */
+export function setVin(vin: string): Promise<boolean> {
+  return patchSharedSettings({ vin: vin.trim().toUpperCase() })
 }
 
 export function getPollMinutes(): number {
@@ -68,6 +69,7 @@ export function getPollMinutes(): number {
   return Math.max(MIN_POLL_MINUTES, value)
 }
 
-export function setPollMinutes(minutes: number): void {
-  patchSharedSettings({ pollMinutes: Math.max(MIN_POLL_MINUTES, Math.round(minutes)) })
+/** Resolves once the store has it — see patchSharedSettings. */
+export function setPollMinutes(minutes: number): Promise<boolean> {
+  return patchSharedSettings({ pollMinutes: Math.max(MIN_POLL_MINUTES, Math.round(minutes)) })
 }

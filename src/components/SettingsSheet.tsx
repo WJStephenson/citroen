@@ -42,6 +42,8 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  // Save is a round trip to the store now, not a local write — see save().
+  const [saving, setSaving] = useState(false)
   // Which notifications *this* browser is signed up for — checked async
   // against the service worker registration, unlike everything else on this
   // sheet, which reads a synchronous snapshot. Null until that check
@@ -105,9 +107,27 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
     }
   }
 
-  const save = () => {
-    setVin(vin)
-    setPollMinutes(minutes)
+  /*
+   * Both writes are awaited before the reload, and this is not a nicety.
+   * patchSharedSettings applies the change to the local mirror at once and
+   * sends it to the store; reloading in the same breath aborted that request
+   * as navigation tore the page down, and the reload's own GET then wrote the
+   * server's older blob back over the mirror. The setting closed the sheet
+   * looking saved and came back changed — most visibly on the poll interval,
+   * which is the one people have a reason to move.
+   *
+   * A store that cannot be reached is reported rather than reloaded past: the
+   * mirror still holds the new value at that point, so reloading would be the
+   * one action guaranteed to throw it away.
+   */
+  const save = async () => {
+    setSaving(true)
+    const stored = await Promise.all([setVin(vin), setPollMinutes(minutes)])
+    setSaving(false)
+    if (!stored.every(Boolean)) {
+      setNotice('Could not reach the settings store — nothing was saved.')
+      return
+    }
     onClose()
     // Config is read at call time, so a reload guarantees every hook agrees.
     window.location.reload()
@@ -405,8 +425,13 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
           <button type="button" className="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="button is-primary" onClick={save}>
-            Save
+          <button
+            type="button"
+            className="button is-primary"
+            onClick={() => void save()}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

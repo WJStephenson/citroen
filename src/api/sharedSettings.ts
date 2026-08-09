@@ -83,14 +83,28 @@ export async function refreshSharedSettings(): Promise<void> {
 
 /**
  * Merges `patch` into the shared blob: applied to the local mirror at once,
- * so this device's own UI reflects it immediately, and sent to the store in
- * the background. A device that is briefly offline keeps its own change; the
- * next successful read or write from any device reconciles it. Good enough
- * for a household sharing one car — not built for simultaneous editors.
+ * so this device's own UI reflects it immediately, and sent to the store. A
+ * device that is briefly offline keeps its own change; the next successful
+ * read or write from any device reconciles it. Good enough for a household
+ * sharing one car — not built for simultaneous editors.
+ *
+ * Resolves true once the store has taken the change. Most callers have no use
+ * for that and may ignore it — a tariff edit or a widget reorder is allowed to
+ * settle whenever it settles. A caller that is about to *reload the page*
+ * cannot: navigation aborts an in-flight fetch, and the reload's own GET then
+ * overwrites the local mirror with the server's older blob, so the setting
+ * appears to save and then silently reverts. That is what the Settings sheet
+ * awaits before reloading.
+ *
+ * The store answers a PUT with the whole merged blob, and that answer is
+ * committed in place of the optimistic one: it is the reconciled truth,
+ * including any field another phone changed in the meantime.
  */
-export function patchSharedSettings(patch: SharedSettingsBlob): void {
+export async function patchSharedSettings(patch: SharedSettingsBlob): Promise<boolean> {
   commit({ ...cache, ...patch })
-  void request('PUT', patch)
+  const merged = await request('PUT', patch)
+  if (merged) commit(merged)
+  return merged !== null
 }
 
 /**

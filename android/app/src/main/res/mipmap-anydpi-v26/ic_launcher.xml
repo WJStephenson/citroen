@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The PWA's own maskable icon, reused so the wrapped app and the installed web
+  app are indistinguishable on the home screen. Inset because the two masking
+  rules differ: a maskable web icon keeps its content inside the middle 80%,
+  where an adaptive Android icon only shows the middle 66%, and without this
+  the outer ring of the artwork is cropped away.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@color/background" />
+  <foreground>
+    <inset
+        android:drawable="@mipmap/ic_launcher_foreground"
+        android:inset="10%" />
+  </foreground>
+</adaptive-icon>

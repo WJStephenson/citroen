@@ -23,3 +23,22 @@ deploy/settings_data/
 # charge_notify's session-notified state, if docker-compose.notify.yml is run
 # from inside this repo.
 deploy/notify_data/
+
+# ---- Android wrapper ----
+
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# The widget's Cloudflare Access service token and the car's VIN. Copy
+# android/secrets.properties.example to make one.
+android/secrets.properties
+
+# The app signing key and its password. This is the app's identity — Android
+# only installs updates signed with the same key, and assetlinks.json on the
+# host names its fingerprint. It never belongs in the repo; CI gets a base64
+# copy from a GitHub secret. See deploy/make-signing-key.sh.
+*.jks
+*.keystore
+android/keystore.properties

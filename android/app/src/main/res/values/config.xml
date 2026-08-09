@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The one place the hostname is written. Three things need it and they need to
+  agree: the URL the TWA opens, the host its intent filter claims, and the site
+  its asset statement vouches for. A mismatch between the last two is the
+  classic "why is there a URL bar over my app" bug.
+-->
+<resources>
+  <string name="host" translatable="false">citroen.knotworking.dev</string>
+  <string name="start_url" translatable="false">https://citroen.knotworking.dev/</string>
+
+  <!--
+    The widget cannot read the app's unit preference: that is per-device
+    localStorage belonging to Chrome, and this process cannot see it. So it
+    carries its own, and this is the line to flip if the two disagree. Set to
+    miles on the assumption of a UK car; the web app's own default is km.
+  -->
+  <bool name="use_miles">true</bool>
+
+  <!-- Escaped quotes because this is JSON inside an XML string resource, and
+       one line because Android collapses whitespace in an unquoted one. It is
+       read by Chrome, not by us. -->
+  <string name="asset_statements" translatable="false">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://citroen.knotworking.dev\"}}]</string>
+</resources>

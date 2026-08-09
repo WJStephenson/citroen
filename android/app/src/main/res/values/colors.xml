@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The web app's own tokens, so the widget and the tile it mirrors are the same
+  object seen twice. Lifted from src/styles.css; the three level colours are
+  what StatWidgets.tsx::levelColour picks between.
+-->
+<resources>
+  <color name="background">#FF121212</color>
+  <color name="surface">#FF0D0D10</color>
+  <color name="track">#FF2E2E35</color>
+  <color name="text">#FFECECEC</color>
+  <color name="muted">#FF91919A</color>
+
+  <color name="accent">#FF3DDC97</color>
+  <color name="warn">#FFF2B544</color>
+  <color name="danger">#FFEF5F5F</color>
+</resources>

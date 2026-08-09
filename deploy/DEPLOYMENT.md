@@ -290,6 +290,81 @@ Units and the app lock are per-device, so set those separately on each phone.
 
 ---
 
+## 9. The Android wrapper and its home screen widget (optional)
+
+The installed PWA cannot put a widget on the home screen — no browser can, on
+Android. `android/` is a thin native app that can: it runs the same web app as
+a **Trusted Web Activity** (Chrome full-screen, so the same Access cookie, the
+same service worker, the same push subscription — not a WebView) and ships a
+native charge widget beside it.
+
+The widget cannot borrow the web app's session: the page's cookies belong to
+Chrome and no native code can read them. It authenticates as a machine
+instead.
+
+**1. Mint the signing key and publish what vouches for it.**
+
+```bash
+./deploy/make-signing-key.sh          # asks for a password; keep it
+npm run build && <your rsync/copy>    # assetlinks.json ships inside dist/
+```
+
+The script writes `public/.well-known/assetlinks.json` with the key's
+fingerprint and prints a base64 copy of the keystore for CI.
+
+**2. Let Chrome read that file anonymously.** In Zero Trust → Access → your
+application, add a **Bypass** policy for the path
+`/.well-known/assetlinks.json`. Chrome fetches it with no cookies; behind
+Access it gets the login page instead, verification fails silently, and the app
+runs with a browser URL bar pinned across the top. Nothing in the file is
+secret — a package name and a certificate fingerprint, both public by design.
+
+Verify from somewhere with no Access session:
+
+```bash
+curl -sS https://citroen.knotworking.dev/.well-known/assetlinks.json
+```
+
+**3. Give the widget a credential of its own.** Zero Trust → Access → **Service
+Auth** → create a service token. Then add an Access application covering **only**
+the read path:
+
+| | |
+|---|---|
+| Application | `citroen.knotworking.dev/api/get_vehicleinfo` |
+| Policy 1 | *Service Auth* → the token you just made |
+| Policy 2 | *Allow* → your usual email/IdP rule, so the PWA still works |
+
+Scope matters here more than anywhere else in this document. The token sits in
+an APK on a phone, and `psa_car_controller` has no authentication of its own: a
+token that also reaches `/preconditioning` or `/lock_door` is a car key on the
+lock screen. This one can read a cached battery percentage and nothing else.
+
+**4. Build the APK.** Push the branch and let CI do it — Actions → **Android** →
+download `citroen-apk`. It wants six repository secrets:
+
+| Secret | From |
+|---|---|
+| `CITROEN_VIN` | the car |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | the service token, step 3 |
+| `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` | the script, step 1 |
+
+Or locally, with a JDK and the Android SDK: copy
+`android/secrets.properties.example` to `android/secrets.properties`, fill it
+in, and `cd android && ./gradlew assembleRelease`.
+
+**5. Install it, then remove the old icon.** Sideload the APK. Once asset links
+verify, the app answers for the hostname itself, so uninstall the previously
+installed PWA or you will have two icons for one car. Long-press the home
+screen → Widgets → **ë-C4** → *Charge*.
+
+The widget reads `?from_cache=1` every 15 minutes, which is
+`psa_car_controller`'s stored state and never touches the car — the same
+guarantee as the app's background polling. Tap the tile to open the app, tap
+the mark in its corner to force a read.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -298,6 +373,10 @@ Units and the app lock are per-device, so set those separately on each phone.
 | App loads, every value is `—`, "Cannot reach the bridge" | `/api/` proxy wrong, or the bridge is down. Test `curl https://host/api/get_vehicleinfo/<VIN>` |
 | "Session expired. Reload to sign in again." | Cloudflare Access returned its login HTML. Re-authenticate, and raise the session duration |
 | "No VIN configured" | Set it in ⚙ |
+| Wrapped app runs with a URL bar across the top | Asset links did not verify: `assetlinks.json` not deployed, not bypassed in Access, or the fingerprint is not the key the APK was signed with |
+| Widget says *Access denied* | The service token is missing, expired, or the Access application does not cover `/api/get_vehicleinfo` (step 9.3) |
+| Widget says *Not set up* | The APK was built without `CITROEN_VIN` or the token — check the secrets on the build |
+| Widget never updates | Battery optimisation is holding WorkManager. Settings → Apps → ë-C4 → Battery → Unrestricted |
 | VIN/tariff/layout differ between phones, or a phone reverts to defaults after being offline | `settings_store` unreachable or not started (step 2b). Test `curl https://host/settings/` — an empty `{}` means it's up but nothing's been saved from that request yet |
 | Charge limit / stop time error `VIN not in list` | Charge control not set up in the bridge (step 3) |
 | Charging history empty | Recording not enabled, or no completed sessions yet (step 3) |

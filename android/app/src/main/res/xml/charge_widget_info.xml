@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is 0 on purpose. The platform's own widget timer has a
+  30-minute floor and no network awareness; WorkManager does the refreshing
+  instead (ChargeWorker), which can be told to wait for a connection and can be
+  kicked on demand from the widget's own refresh mark.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_charge"
+    android:minHeight="110dp"
+    android:minWidth="110dp"
+    android:previewLayout="@layout/widget_charge"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

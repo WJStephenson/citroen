@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">ë-C4</string>
+  <string name="widget_label">Charge</string>
+  <string name="widget_description">State of charge, read from the bridge\'s cache so it never wakes the car.</string>
+  <string name="refresh">Refresh</string>
+  <string name="open_app">Open ë-C4</string>
+
+  <!-- Widget copy. Each one says what the widget actually knows, on the same
+       principle the web app's tiles are written to: no reading is better than
+       a number nothing is holding. -->
+  <string name="no_reading">—</string>
+  <string name="not_configured">Not set up</string>
+  <string name="offline">No connection</string>
+  <string name="denied">Access denied</string>
+  <string name="bridge_error">Bridge error</string>
+  <string name="never_fetched">Never fetched</string>
+  <string name="charging">Charging</string>
+  <string name="no_range">Range not reported</string>
+  <string name="as_of">Read %1$s</string>
+  <string name="range_miles">%1$d mi of range</string>
+  <string name="range_km">%1$d km of range</string>
+</resources>

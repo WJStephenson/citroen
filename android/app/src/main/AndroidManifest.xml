@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Two things in one APK, which is the whole reason the APK exists:
+
+    LauncherActivity   the PWA, run as a Trusted Web Activity. Not a WebView —
+                       this is Chrome rendering citroen.knotworking.dev
+                       full-screen, so it shares Chrome's cookie jar (the
+                       Cloudflare Access session), its service worker (offline
+                       launch) and its push subscription. A WebView wrapper
+                       would have none of the three.
+
+    ChargeWidget       a native home screen widget. It cannot see any of the
+                       above: a widget is RemoteViews drawn by the launcher's
+                       process, and this app cannot read Chrome's cookies. So
+                       it makes its own request with its own credential — see
+                       ChargeRepository.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+  <application
+      android:allowBackup="false"
+      android:icon="@mipmap/ic_launcher"
+      android:label="@string/app_name"
+      android:roundIcon="@mipmap/ic_launcher"
+      android:supportsRtl="true"
+      android:theme="@style/Theme.Citroen">
+
+    <!--
+      What this app claims to be part of. Chrome checks it against
+      https://citroen.knotworking.dev/.well-known/assetlinks.json, fetched
+      anonymously — which is why that one path needs a Cloudflare Access
+      bypass, or verification fails and the app runs with a browser URL bar
+      pinned across the top. See deploy/DEPLOYMENT.md.
+    -->
+    <meta-data
+        android:name="asset_statements"
+        android:resource="@string/asset_statements" />
+
+    <activity
+        android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+        android:exported="true"
+        android:label="@string/app_name">
+
+      <meta-data
+          android:name="android.support.customtabs.trusted.DEFAULT_URL"
+          android:value="@string/start_url" />
+      <meta-data
+          android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+          android:resource="@color/background" />
+      <meta-data
+          android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
+          android:resource="@color/background" />
+      <!-- The web app is dark-first and paints its own background instantly
+           from the service worker cache, so there is no splash screen here to
+           flash a second one over it. -->
+
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+
+      <!-- Once asset links verify, this app answers for its own hostname, so
+           a link to the car opens here rather than in a browser tab. -->
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data
+            android:host="@string/host"
+            android:scheme="https" />
+      </intent-filter>
+    </activity>
+
+    <!-- Hands Chrome's Web Push notifications to this app, so a charge
+         finishing overnight arrives as "ë-C4" rather than as "Chrome". The
+         subscription itself is unchanged — it is the same service worker. -->
+    <service
+        android:name="com.google.androidbrowserhelper.trusted.DelegationService"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.support.customtabs.trusted.TRUSTED_WEB_ACTIVITY_SERVICE" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </service>
+
+    <receiver
+        android:name=".widget.ChargeWidgetProvider"
+        android:exported="false">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        <action android:name="dev.knotworking.citroen.REFRESH" />
+      </intent-filter>
+      <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/charge_widget_info" />
+    </receiver>
+  </application>
+</manifest>

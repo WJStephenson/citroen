@@ -106,6 +106,11 @@ only — you already have the domain, tunnel, and nginx container.
   [Session cost](#session-cost-is-worked-out-in-the-app-not-taken-from-the-bridge).
   There is one electricity contract for the car, so the tariff is shared across
   devices too.
+- **Home screen widget**, from the optional Android wrapper in `android/` — the
+  charge ring and range on the launcher, without opening anything. No browser
+  can put a widget on an Android home screen, so this is a small native app
+  that runs the same PWA as a Trusted Web Activity and carries the widget
+  alongside it. See [The Android wrapper](#the-android-wrapper).
 - **Units** — km/miles and °C/°F, switchable in Settings, applied instantly.
   Kept per-device, deliberately — see
   [Shared settings](#shared-settings-across-devices).
@@ -603,6 +608,56 @@ claim, and both took a go to get right:
 The hint lives in component state and dies with the session — one that outlives
 the session it was made in is indistinguishable from a reading, which is the
 mistake the paragraph above this one is about.
+
+---
+
+## The Android wrapper
+
+`android/` is optional, and exists for one reason: **a PWA cannot put a widget
+on an Android home screen.** Chrome doesn't implement the Badging API there
+either, so neither the launcher icon nor a widget can carry the state of
+charge. Only a real APK can.
+
+It is a **Trusted Web Activity**, not a WebView wrapper, and the distinction is
+the whole design. A TWA is Chrome rendering the site full-screen without
+browser chrome, so the web app keeps Chrome's storage: the Cloudflare Access
+cookie still authenticates it, the service worker still serves it offline, and
+the existing Web Push subscription still delivers the charge notifications
+(delegated so they arrive as *ë-C4* rather than as *Chrome*). A `WebView` would
+have its own cookie jar, no Web Push at all, and would mean logging into Access
+inside it.
+
+**What wrapping does not buy.** The widget cannot see the web app. A widget is
+`RemoteViews` drawn by the launcher's process; it cannot render a page, and
+native code cannot read Chrome's cookies. So it is a sibling of the PWA in one
+APK, not a view of it — it makes its own request, with its own credential:
+
+- **A Cloudflare Access service token**, the machine-traffic case this README
+  already distinguishes from browser traffic, scoped in Access to
+  `/api/get_vehicleinfo` alone. It lives in an APK on a phone, and the bridge
+  behind it has no authentication of its own — a token that could also reach
+  `/preconditioning` is a car key on the lock screen.
+- **`?from_cache=1`**, so the 15-minute refresh reads the bridge's stored state
+  and never wakes the car. A widget on the live endpoint would quietly undo
+  [Battery safety](#battery-safety).
+
+Its readings are held to the same standard as the tiles': a failed refresh
+keeps the last good number and says why it is old rather than blanking, the
+ring uses the same three severity colours as the charge tile, and a reading
+older than 45 minutes says its age instead of its range — the same threshold
+`App.tsx` calls stale.
+
+Nothing about the web app depends on any of this. `npm run build` neither knows
+nor cares that `android/` exists; the only thing the two share is
+`public/.well-known/assetlinks.json`, which ships in `dist/` and is what tells
+Chrome the APK may act for the domain.
+
+Building it needs no toolchain on your part — `.github/workflows/android.yml`
+produces a signed APK as a run artifact. The signing key is deliberately not in
+this repo: `deploy/make-signing-key.sh` mints it, writes the asset-links file
+for it, and prints the base64 to paste into a GitHub secret. Full walkthrough,
+including the two Access policies it needs, is
+[step 9 of DEPLOYMENT.md](deploy/DEPLOYMENT.md#9-the-android-wrapper-and-its-home-screen-widget-optional).
 
 ---
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The TWA host activity is never actually drawn — Chrome takes the screen
+  immediately — so this exists only to stop a light system theme flashing
+  white before it does.
+-->
+<resources>
+  <style name="Theme.Citroen" parent="android:Theme.Material.NoActionBar">
+    <item name="android:windowBackground">@color/background</item>
+    <item name="android:statusBarColor">@color/background</item>
+    <item name="android:navigationBarColor">@color/background</item>
+  </style>
+</resources>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The ring is a bitmap drawn in Ring.kt rather than a progress drawable: it has
+  a rounded cap, a track behind it and a colour that changes with the level, and
+  a Canvas gets all three in twenty lines where nested layer-lists would not.
+  The number stays a real TextView so it still scales with the system font size.
+
+  Two tap targets: the tile opens the app, the mark in the corner refreshes.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="8dp">
+
+  <ImageView
+      android:id="@+id/ring"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:contentDescription="@null"
+      android:scaleType="fitCenter" />
+
+  <LinearLayout
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_gravity="center"
+      android:gravity="center_horizontal"
+      android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/level"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:includeFontPadding="false"
+        android:text="@string/no_reading"
+        android:textColor="@color/text"
+        android:textSize="26sp" />
+
+    <TextView
+        android:id="@+id/note"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:gravity="center_horizontal"
+        android:maxLines="2"
+        android:text="@string/never_fetched"
+        android:textColor="@color/muted"
+        android:textSize="11sp" />
+  </LinearLayout>
+
+  <ImageView
+      android:id="@+id/refresh"
+      android:layout_width="32dp"
+      android:layout_height="32dp"
+      android:layout_gravity="top|end"
+      android:contentDescription="@string/refresh"
+      android:padding="6dp"
+      android:src="@drawable/ic_refresh" />
+</FrameLayout>

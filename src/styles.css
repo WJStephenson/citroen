@@ -56,8 +56,8 @@
 
   /*
    * --accent/--warn/--danger are tuned to sit on this dark surface, including
-   * as small-text foreground (armed pull-indicator, sheet notices, low-voltage
-   * warnings). The light theme below needs darker, more saturated versions for
+   * as small-text foreground (sheet notices, low-voltage warnings). The light
+   * theme below needs darker, more saturated versions for
    * that same text role — brightening the surface without these would make
    * green-on-white, amber-on-white etc. illegible — while fills like
    * .button.is-primary keep using the bright base color against --on-accent.
@@ -127,12 +127,10 @@ button {
 }
 
 .app {
-  position: relative; /* containing block for .pull-indicator */
   max-width: 34rem;
   margin: 0 auto;
   padding: calc(env(safe-area-inset-top) + 0.75rem) var(--page-pad)
     calc(env(safe-area-inset-bottom) + 2.5rem);
-  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
 /* Room for the rearrange bar, which is fixed over the bottom of the page. */
@@ -209,24 +207,6 @@ button {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* ---------- pull to refresh ---------- */
-
-.pull-indicator {
-  position: absolute;
-  top: calc(env(safe-area-inset-top) + 0.25rem);
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 0.8125rem;
-  color: var(--muted);
-  pointer-events: none;
-  transition: color 150ms ease;
-}
-
-.pull-indicator.is-armed {
-  color: var(--accent-fg);
 }
 
 /* ---------- car hero ---------- */

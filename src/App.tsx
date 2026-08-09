@@ -10,6 +10,7 @@ import { LayoutIcon, RefreshIcon, SettingsIcon } from './components/Icons'
 import { LocationWidget } from './components/LocationWidget'
 import { LockWidget } from './components/LockWidget'
 import { PreconditionWidget } from './components/PreconditionWidget'
+import { RefreshConfirmModal } from './components/RefreshConfirmModal'
 import { SettingsSheet } from './components/SettingsSheet'
 import {
   AuxWidget,
@@ -26,7 +27,6 @@ import { useAppLock } from './hooks/useAppLock'
 import { useBatteryHealth } from './hooks/useBatteryHealth'
 import { useCommands } from './hooks/useCommands'
 import { useOnline } from './hooks/useOnline'
-import { usePullToRefresh } from './hooks/usePullToRefresh'
 import { useVehicle } from './hooks/useVehicle'
 import { LockScreen } from './lock/LockScreen'
 import { applyUpdate, registerServiceWorker } from './sw-register'
@@ -49,6 +49,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editingLayout, setEditingLayout] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
+  const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false)
   const [, forceTick] = useState(0)
 
   // Telemetry only flows once the app is unlocked.
@@ -56,22 +57,8 @@ export default function App() {
   const soh = useBatteryHealth(!lock.locked)
   const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
-  // A deliberate pull is the user asking the car itself, not the bridge cache.
+  // A deliberate refresh is the user asking the car itself, not the bridge cache.
   const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
-  /*
-   * The pull listens on the window, so anything else that wants a downward drag
-   * has to be excluded by hand or the two fire together.
-   *
-   *   editingLayout — rearranging is a drag that starts at the top of the page
-   *                   as often as not;
-   *   settingsOpen  — the sheet is dragged down to dismiss, and the pull was
-   *                   taking that gesture and hauling the dashboard down behind
-   *                   the backdrop instead.
-   */
-  const pull = usePullToRefresh(
-    liveRefresh,
-    !lock.locked && !commands.active && !editingLayout && !settingsOpen,
-  )
 
   useEffect(() => registerServiceWorker(() => setUpdateReady(true)), [])
 
@@ -162,18 +149,7 @@ export default function App() {
     : []
 
   return (
-    <div
-      className={`app ${editingLayout ? 'is-editing-layout' : ''}`}
-      style={{ transform: pull.pull ? `translateY(${pull.pull}px)` : undefined }}
-    >
-      <div
-        className={`pull-indicator ${pull.armed ? 'is-armed' : ''}`}
-        style={{ opacity: pull.pull / pull.threshold }}
-        aria-hidden="true"
-      >
-        {pull.armed ? 'Release to refresh' : 'Pull to refresh'}
-      </div>
-
+    <div className={`app ${editingLayout ? 'is-editing-layout' : ''}`}>
       <header className="app-bar">
         <div>
           <h1>ë-C4</h1>
@@ -196,7 +172,7 @@ export default function App() {
           <button
             type="button"
             className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
-            onClick={() => void liveRefresh()}
+            onClick={() => setConfirmRefreshOpen(true)}
             disabled={vehicle.refreshing}
             aria-label="Refresh vehicle state from the car"
           >
@@ -271,7 +247,7 @@ export default function App() {
         ) : (
           <div className="empty">
             <p>No vehicle data yet.</p>
-            <button type="button" className="button is-primary" onClick={() => void liveRefresh()}>
+            <button type="button" className="button is-primary" onClick={() => setConfirmRefreshOpen(true)}>
               Try again
             </button>
           </div>
@@ -288,6 +264,16 @@ export default function App() {
 
       {settingsOpen && (
         <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
+      )}
+
+      {confirmRefreshOpen && (
+        <RefreshConfirmModal
+          onCancel={() => setConfirmRefreshOpen(false)}
+          onConfirm={() => {
+            setConfirmRefreshOpen(false)
+            void liveRefresh()
+          }}
+        />
       )}
     </div>
   )

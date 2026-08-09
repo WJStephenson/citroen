@@ -11,13 +11,13 @@ export interface VehicleFeed {
   /** True only for the initial load, so refreshes don't blank the screen. */
   loading: boolean
   refreshing: boolean
-  /** When *we* last successfully polled the bridge. */
-  fetchedAt: Date | null
   /**
-   * `live` forces a read from the car itself. Omit it for routine refreshes,
-   * which read psa_car_controller's cache and never wake a parked car.
+   * When *we* last successfully read. Says the app is working, not that the
+   * car has said anything lately — for that, see `state.reportedAt`, which is
+   * what the dashboard shows.
    */
-  refresh: (options?: { live?: boolean }) => Promise<void>
+  fetchedAt: Date | null
+  refresh: () => Promise<void>
   /** Locally applied expectation, reconciled on the next successful poll. */
   patch: (changes: Partial<VehicleState>) => void
 }
@@ -25,10 +25,17 @@ export interface VehicleFeed {
 /**
  * Owns vehicle telemetry.
  *
- * Polling is deliberately slow (20+ minutes, see config.MIN_POLL_MINUTES):
- * every poll can keep the car's ECUs awake and drain the 12V auxiliary battery.
- * The timer is also suspended whenever the app is not visible, so a PWA left
- * open in the background costs nothing.
+ * Every poll here is a read of Stellantis's status record and never reaches
+ * the car (see api/client.ts::fetchVehicleState). Polling was slowed to 20+
+ * minutes to protect the 12V battery from a cost reads do not have, and the
+ * effect was the opposite of the intent: the app sat on an old reading for
+ * twenty minutes at a time and made people press the one button they had been
+ * told wakes the car. The interval is now about not leaning on someone else's
+ * API — see config.MIN_POLL_MINUTES.
+ *
+ * The timer is still suspended whenever the app is not visible: nobody is
+ * reading a backgrounded dashboard, and the charge-finished notification comes
+ * from the server-side watcher (deploy/charge_notify.py) rather than from here.
  *
  * The feed opens on the last stored reading rather than on nothing (see
  * api/snapshot.ts), so the dashboard is answerable the instant it is launched
@@ -44,18 +51,19 @@ export function useVehicle(enabled: boolean): VehicleFeed {
   const [refreshing, setRefreshing] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<Date | null>(cached?.fetchedAt ?? null)
 
-  // Guards against two overlapping polls (manual pull + timer firing together).
+  // Guards against two overlapping polls (the ⟳ button + the timer firing
+  // together).
   const inFlight = useRef<Promise<void> | null>(null)
   const fetchedAtRef = useRef<Date | null>(cached?.fetchedAt ?? null)
   const errorRef = useRef<ApiError | null>(null)
 
-  const refresh = useCallback<VehicleFeed['refresh']>(async (options) => {
+  const refresh = useCallback<VehicleFeed['refresh']>(async () => {
     if (inFlight.current) return inFlight.current
 
     const run = (async () => {
       setRefreshing(true)
       try {
-        const next = await fetchVehicleState(!options?.live)
+        const next = await fetchVehicleState()
         setState(next)
         errorRef.current = null
         setError(null)
@@ -105,8 +113,8 @@ export function useVehicle(enabled: boolean): VehicleFeed {
       schedule()
     }
 
-    // On foreground: only hit the car if the data is actually stale. Returning
-    // to the app ten times in a minute must not mean ten wake-up attempts.
+    // On foreground: only read if the last one has aged out. Returning to the
+    // app ten times in a minute is one read, not ten.
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return
       const last = fetchedAtRef.current

@@ -47,9 +47,10 @@ services:
     environment:
       - PSACC_URL=http://psa_car_controller:5000
       - SETTINGS_URL=http://settings_store:8090
-      # Every poll here is a local bridge read (from_cache / charge_control),
-      # never a call to the car, so this can run far more often than the
-      # PWA's own 20+ minute floor without any 12V-drain concern.
+      # Neither read here reaches the car: get_vehicleinfo asks Stellantis for
+      # the status they hold, charge_control is local to the bridge. So the
+      # only thing this interval trades against is politeness to someone
+      # else's API, not the 12V battery.
       - POLL_SECONDS=300
 
     command: sh -c "pip install --no-cache-dir --quiet pywebpush && python -u charge_notify.py"

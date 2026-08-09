@@ -14,12 +14,32 @@ import { getSharedSettings, patchSharedSettings } from './api/sharedSettings'
 export const API_BASE = import.meta.env.VITE_API_BASE ?? '/api'
 
 /**
- * The doc's §5 mitigation for 12V auxiliary battery drain: never poll the car
- * more often than this while it is parked. Manual pull-to-refresh is the
- * primary way to get fresh state.
+ * How often the app re-reads vehicle state in the background.
+ *
+ * This used to be floored at 20 minutes as the doc's §5 mitigation for 12V
+ * drain, on the belief that a read reaches the car. It does not: reading
+ * without `from_cache` calls Stellantis's `/vehicles/{id}/status`, which
+ * returns whatever the car last uploaded to them (see api/client.ts). The one
+ * call that touches the car is `/wakeup`, which is a deliberate, confirmed
+ * action here and nothing else in the app sends it.
+ *
+ * So the floor is now what a read actually costs — someone else's API — and is
+ * set by Stellantis's tolerance rather than the car's battery. psa_car_controller
+ * polls the same endpoint every 120s when charge control is on, which puts five
+ * minutes comfortably inside what upstream treats as normal.
  */
-export const MIN_POLL_MINUTES = 20
-export const DEFAULT_POLL_MINUTES = Number(import.meta.env.VITE_POLL_MINUTES ?? 20)
+export const MIN_POLL_MINUTES = 5
+export const DEFAULT_POLL_MINUTES = Number(import.meta.env.VITE_POLL_MINUTES ?? 5)
+
+/**
+ * How old the car's own reading may get before the dashboard says so.
+ *
+ * Measured on the car's timestamp, not on ours — see App.tsx. Two hours is
+ * long enough that an ordinary parked evening does not cry stale, and short
+ * enough that a car which has genuinely stopped reporting is called out before
+ * you plan a journey around one of its numbers.
+ */
+export const STALE_AFTER_MINUTES = 120
 
 /**
  * Stellantis sends an SMS wake-up packet to the car's ECU and the vehicle can

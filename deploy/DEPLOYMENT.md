@@ -358,10 +358,10 @@ verify, the app answers for the hostname itself, so uninstall the previously
 installed PWA or you will have two icons for one car. Long-press the home
 screen → Widgets → **ë-C4** → *Charge*.
 
-The widget reads `?from_cache=1` every 15 minutes, which is
-`psa_car_controller`'s stored state and never touches the car — the same
-guarantee as the app's background polling. Tap the tile to open the app, tap
-the mark in its corner to force a read.
+The widget reads `get_vehicleinfo` every 15 minutes, uncached — the same call
+the app's background polling makes, and like it, a read of the status record
+Stellantis holds rather than anything sent to the car. Tap the tile to open the
+app, tap the mark in its corner to force a read.
 
 ---
 

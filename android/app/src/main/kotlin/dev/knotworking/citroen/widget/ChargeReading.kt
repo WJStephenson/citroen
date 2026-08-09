@@ -29,12 +29,24 @@ internal data class ChargeReading(
 
   val hasReading: Boolean get() = level != null
 
-  /** The web app calls a reading stale at 45 minutes (App.tsx); so does this. */
+  /**
+   * How old the number on the home screen is: the car's own clock when it gave
+   * one, ours only when it did not.
+   *
+   * Staleness used to be measured on `fetchedAt` alone, which is the age of
+   * the request and is a few minutes old at worst. The widget could therefore
+   * refresh on schedule, succeed every time, and go a whole day without once
+   * admitting that the reading it was redrawing had not changed since
+   * yesterday.
+   */
+  val asOf: Long get() = reportedAt ?: fetchedAt
+
+  /** The same two hours App.tsx calls stale (config.ts:STALE_AFTER_MINUTES). */
   fun isStale(now: Long = System.currentTimeMillis()): Boolean =
-    now - fetchedAt > STALE_AFTER_MS
+    now - asOf > STALE_AFTER_MS
 
   companion object {
-    const val STALE_AFTER_MS = 45L * 60_000
+    const val STALE_AFTER_MS = 120L * 60_000
 
     val EMPTY = ChargeReading(null, null, false, null, 0, null)
 

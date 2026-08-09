@@ -37,9 +37,24 @@ services:
       # the charge limit and the charging stop time; without it those two
       # commands return {"error": "VIN not in list"}.
       #
-      # Newer builds configure both from the web wizard instead. Start without
-      # this line; only add it if recording or charge control fail to appear.
-      # - PSACC_OPTIONS=-c charge_config.json -r
+      # -R is the one worth having on regardless. It runs PSACC's own refresh
+      # thread, which re-reads each car's status from Stellantis every N
+      # minutes and updates the copy `?from_cache=1` serves. Without it (or
+      # without -c, which starts the same thread) that copy is refreshed by
+      # nothing at all — see psacc/application/car_controller.py, where
+      # start_refresh_thread is only reached under one of those two flags. A
+      # bridge left on the default answers every cached read with whatever it
+      # happened to see last, which may be hours old and gives no sign of it.
+      #
+      # It costs the car nothing: the refresh is an HTTPS read of the status
+      # record Stellantis holds, not a call to the vehicle. Only /wakeup
+      # reaches the car. Five minutes is well inside upstream's own habits —
+      # it uses 120 seconds when charge control is on.
+      #
+      # Newer builds configure recording and charge control from the web
+      # wizard instead, but -R is not among the wizard's settings.
+      - PSACC_OPTIONS=-R 5
+      # - PSACC_OPTIONS=-c charge_config.json -r -R 5
       - TZ=Europe/London
 
     networks:

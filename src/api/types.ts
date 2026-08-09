@@ -185,6 +185,7 @@ export interface Trip {
 }
 
 export type CommandKind =
+  | 'wake'
   | 'precondition'
   | 'chargeLimit'
   | 'chargeStart'

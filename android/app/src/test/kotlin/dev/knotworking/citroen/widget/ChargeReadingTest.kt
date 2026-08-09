@@ -100,11 +100,34 @@ class ChargeReadingTest {
     assertNull(reading.reportedAt)
   }
 
-  /** The same 45 minutes App.tsx calls stale. */
+  /** The same two hours App.tsx calls stale. */
   @Test
-  fun `goes stale at forty-five minutes`() {
+  fun `goes stale at two hours`() {
     val reading = ChargeReading.parse("""{"energy":[{"type":"Electric","level":50}]}""", now)
-    assertFalse(reading.isStale(now + 44 * 60_000))
-    assertTrue(reading.isStale(now + 46 * 60_000))
+    assertFalse(reading.isStale(now + 119 * 60_000))
+    assertTrue(reading.isStale(now + 121 * 60_000))
+  }
+
+  /**
+   * The bug this widget shipped with: a reading fetched a second ago, of a car
+   * that last spoke yesterday, reported itself fresh. Staleness is the age of
+   * the data, so a successful fetch cannot launder an old number.
+   */
+  @Test
+  fun `a fresh fetch of an old reading is still stale`() {
+    val reading = ChargeReading.parse(
+      """{"energy":[{"type":"Electric","level":50,"updated_at":"2026-08-09T06:00:00Z"}]}""",
+      fetchedAt = 1_770_000_000_000L,
+    )
+    val threeHoursAfterTheCarSpoke = reading.reportedAt!! + 3 * 60 * 60_000
+    assertTrue(reading.isStale(threeHoursAfterTheCarSpoke))
+  }
+
+  /** With no timestamp from the car, our own read time is all there is. */
+  @Test
+  fun `falls back to the fetch time when the car gave no clock`() {
+    val reading = ChargeReading.parse("""{"energy":[{"type":"Electric","level":50}]}""", now)
+    assertNull(reading.reportedAt)
+    assertEquals(now, reading.asOf)
   }
 }

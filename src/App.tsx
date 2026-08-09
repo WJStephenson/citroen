@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { SHARED_SETTINGS_CHANGED } from './api/sharedSettings'
 import { ChargeLimitWidget } from './components/ChargeLimitWidget'
 import { ChargeWindowWidget } from './components/ChargeWindowWidget'
@@ -10,8 +10,8 @@ import { LayoutIcon, RefreshIcon, SettingsIcon } from './components/Icons'
 import { LocationWidget } from './components/LocationWidget'
 import { LockWidget } from './components/LockWidget'
 import { PreconditionWidget } from './components/PreconditionWidget'
-import { RefreshConfirmModal } from './components/RefreshConfirmModal'
 import { SettingsSheet } from './components/SettingsSheet'
+import { WakeConfirmModal } from './components/WakeConfirmModal'
 import {
   AuxWidget,
   CabinWidget,
@@ -22,7 +22,8 @@ import {
   OdometerWidget,
 } from './components/StatWidgets'
 import { WidgetGrid, type WidgetItem } from './components/WidgetGrid'
-import { getVin } from './config'
+import { wakeVehicle } from './api/client'
+import { EXPECTED_WAKE_SECONDS, STALE_AFTER_MINUTES, getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
 import { useBatteryHealth } from './hooks/useBatteryHealth'
 import { useCommands } from './hooks/useCommands'
@@ -31,6 +32,13 @@ import { useVehicle } from './hooks/useVehicle'
 import { LockScreen } from './lock/LockScreen'
 import { applyUpdate, registerServiceWorker } from './sw-register'
 import { isPlausibleAuxVoltage } from './units'
+
+/**
+ * How long to keep saying "waiting" after a wake-up is acknowledged, before
+ * concluding the car did not answer it. Comfortably past the 30-90s the ECUs
+ * take, and past the follow-up read that goes out at the end of that window.
+ */
+const WAKE_PATIENCE_MS = (EXPECTED_WAKE_SECONDS + 90) * 1000
 
 /** "4 min ago" — the age of the data matters more than the clock time here. */
 function relativeTime(date: Date | null): string {
@@ -49,7 +57,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editingLayout, setEditingLayout] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
-  const [confirmRefreshOpen, setConfirmRefreshOpen] = useState(false)
+  const [confirmWakeOpen, setConfirmWakeOpen] = useState(false)
   const [, forceTick] = useState(0)
 
   // Telemetry only flows once the app is unlocked.
@@ -57,12 +65,66 @@ export default function App() {
   const soh = useBatteryHealth(!lock.locked)
   const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
-  // A deliberate refresh is the user asking the car itself, not the bridge cache.
-  const liveRefresh = useCallback(() => vehicle.refresh({ live: true }), [vehicle])
+
+  /**
+   * A wake-up in flight, and the reading it is trying to replace.
+   *
+   * `beating` is the car's timestamp at the moment the wake was sent, not our
+   * clock: the two are not comparable. The car reports to Stellantis *before*
+   * the acknowledgement finishes reaching us, and its clock is not ours
+   * anyway, so "is the reading newer than when I pressed the button" is a
+   * question that answers no to a wake-up that worked perfectly. "Is the
+   * reading a different one from the reading I was looking at" does not care
+   * about either clock.
+   */
+  const [waking, setWaking] = useState<{ at: number; beating: number | null } | null>(null)
+  // Read through a ref so the callback does not have to be rebuilt on every
+  // poll — the same reason useCommands keeps one.
+  const stateRef = useRef(vehicle.state)
+  stateRef.current = vehicle.state
+
+  /*
+   * The only call in the app that reaches the car. It goes through useCommands
+   * like any other command — overlay, elapsed counter, rate-limit reporting —
+   * and waits the full wake window before reading back, because the reading is
+   * the entire point of having sent it.
+   */
+  const wake = useCallback(async () => {
+    const beating = stateRef.current?.reportedAt?.getTime() ?? null
+    const sent = await commands.run({
+      kind: 'wake',
+      label: 'Waking the car',
+      send: wakeVehicle,
+      settleMs: (EXPECTED_WAKE_SECONDS + 15) * 1000,
+    })
+    if (sent) setWaking({ at: Date.now(), beating })
+  }, [commands])
 
   useEffect(() => registerServiceWorker(() => setUpdateReady(true)), [])
 
-  // Keeps the "updated N min ago" label honest without re-polling the car.
+  /*
+   * A wake-up is acknowledged in seconds and answered in up to ninety, so the
+   * dashboard holds "waiting" for the gap rather than dropping straight back
+   * to the stale notice that prompted it. Two things end the wait: a reading
+   * newer than the request, which is the wake having worked, and a ceiling,
+   * which is it having not. Both restore the button — but only once there is
+   * something for pressing it again to mean.
+   */
+  const carReportedAt = vehicle.state?.reportedAt?.getTime() ?? null
+  useEffect(() => {
+    if (waking === null) return
+    if (carReportedAt !== null && carReportedAt !== waking.beating) {
+      setWaking(null)
+      return
+    }
+    const timer = window.setTimeout(
+      () => setWaking(null),
+      Math.max(0, waking.at + WAKE_PATIENCE_MS - Date.now()),
+    )
+    return () => window.clearTimeout(timer)
+  }, [waking, carReportedAt])
+
+  // Keeps the "reported N min ago" label honest without re-reading anything.
   useEffect(() => {
     const timer = window.setInterval(() => forceTick((n) => n + 1), 30_000)
     return () => window.clearInterval(timer)
@@ -80,7 +142,24 @@ export default function App() {
 
   if (lock.locked) return <LockScreen method={lock.method} onUnlock={lock.unlock} />
 
-  const stale = vehicle.fetchedAt !== null && Date.now() - vehicle.fetchedAt.getTime() > 45 * 60_000
+  /*
+   * Staleness is the car's silence, not ours.
+   *
+   * This used to be measured on `fetchedAt` — when the app last managed to
+   * read — which is a fact about the app and is nearly always a few minutes
+   * old by construction. It therefore said "fresh" all day while the numbers
+   * underneath it aged, which is the only way a dashboard can be wrong without
+   * ever displaying a wrong number. `reportedAt` is the car's own timestamp on
+   * the reading, so this now asks the question the tiles are actually
+   * qualified by: how long since the car last said anything.
+   *
+   * A car that reports no timestamp at all cannot be judged, and is not
+   * accused — see the notice below, which says that instead of guessing.
+   */
+  const wakeError = commands.outcomeFor('wake')?.tone === 'error'
+  const reportedAt = vehicle.state?.reportedAt ?? null
+  const reportedAgeMs = reportedAt === null ? null : Date.now() - reportedAt.getTime()
+  const stale = reportedAgeMs !== null && reportedAgeMs > STALE_AFTER_MINUTES * 60_000
 
   /*
    * The canonical layout, which is also the fallback order and the order a
@@ -153,8 +232,21 @@ export default function App() {
       <header className="app-bar">
         <div>
           <h1>ë-C4</h1>
-          <p className="app-bar-sub">
-            {vehicle.refreshing ? 'Refreshing…' : `Updated ${relativeTime(vehicle.fetchedAt)}`}
+          {/*
+            The car's clock, not ours. "Updated 2 min ago" was true of the
+            request and false of everything it described; this line is the one
+            caveat every number on the screen inherits, so it states the age of
+            the data rather than the age of the fetch. Our own read time only
+            appears when the car has never given a timestamp to report, and in
+            the offline banner, where the question really is when this device
+            last managed to get through.
+          */}
+          <p className={`app-bar-sub ${stale ? 'is-stale' : ''}`}>
+            {vehicle.refreshing
+              ? 'Refreshing…'
+              : reportedAt
+                ? `Car reported ${relativeTime(reportedAt)}`
+                : `Read ${relativeTime(vehicle.fetchedAt)}`}
           </p>
         </div>
         <div className="app-bar-actions">
@@ -169,12 +261,15 @@ export default function App() {
               <LayoutIcon />
             </button>
           )}
+          {/* No confirmation: this reads Stellantis's record and never
+              touches the car. The one that does is offered below, and only
+              when the reading is old enough for it to be worth anything. */}
           <button
             type="button"
             className={`icon-button ${vehicle.refreshing ? 'is-spinning' : ''}`}
-            onClick={() => setConfirmRefreshOpen(true)}
+            onClick={() => void vehicle.refresh()}
             disabled={vehicle.refreshing}
-            aria-label="Refresh vehicle state from the car"
+            aria-label="Re-read vehicle state"
           >
             <RefreshIcon />
           </button>
@@ -235,8 +330,41 @@ export default function App() {
         ) : state ? (
           <>
             <CarHero />
-            {state.reportedAt && (
-              <p className="reported-at">Car last reported {relativeTime(state.reportedAt)}</p>
+            {/*
+              Only shown once the reading is old enough that a wake-up is the
+              only thing that would help — which is the same moment the offer
+              becomes worth its cost. A fresh car needs no note and no button:
+              the header already says when it spoke, and there is nothing here
+              to fix.
+            */}
+            {(stale || reportedAt === null || waking !== null) && (
+              <div className="reported-at is-stale" role="status">
+                {/*
+                  Every other command reports on the tile that sent it. This
+                  one is sent from here, so it answers here — and it has to,
+                  because a screen that dropped straight back to "reported 3h
+                  ago" would be indistinguishable from a wake-up that silently
+                  failed, and the obvious response to that is to press it
+                  again into a rate limit.
+                */}
+                <span>
+                  {waking !== null
+                    ? 'Waking — the car answers within about 90 seconds'
+                    : reportedAt
+                      ? `Car last reported ${relativeTime(reportedAt)}`
+                      : 'The car has not reported a reading'}
+                </span>
+                {waking === null && (
+                  <button
+                    type="button"
+                    className="button is-quiet is-small"
+                    onClick={() => setConfirmWakeOpen(true)}
+                    disabled={commands.active !== null}
+                  >
+                    {wakeError ? 'Try again' : 'Wake the car'}
+                  </button>
+                )}
+              </div>
             )}
             <WidgetGrid
               items={widgets}
@@ -247,7 +375,7 @@ export default function App() {
         ) : (
           <div className="empty">
             <p>No vehicle data yet.</p>
-            <button type="button" className="button is-primary" onClick={() => setConfirmRefreshOpen(true)}>
+            <button type="button" className="button is-primary" onClick={() => void vehicle.refresh()}>
               Try again
             </button>
           </div>
@@ -266,12 +394,13 @@ export default function App() {
         <SettingsSheet onClose={() => setSettingsOpen(false)} onLockChanged={lock.refreshMethod} />
       )}
 
-      {confirmRefreshOpen && (
-        <RefreshConfirmModal
-          onCancel={() => setConfirmRefreshOpen(false)}
+      {confirmWakeOpen && (
+        <WakeConfirmModal
+          reportedAgo={reportedAt ? relativeTime(reportedAt) : 'nothing this device has seen'}
+          onCancel={() => setConfirmWakeOpen(false)}
           onConfirm={() => {
-            setConfirmRefreshOpen(false)
-            void liveRefresh()
+            setConfirmWakeOpen(false)
+            void wake()
           }}
         />
       )}

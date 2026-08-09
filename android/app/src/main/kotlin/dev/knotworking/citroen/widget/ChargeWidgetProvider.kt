@@ -60,7 +60,7 @@ class ChargeWidgetProvider : AppWidgetProvider() {
     private const val PERIODIC_WORK = "charge-refresh-periodic"
     private const val ONE_OFF_WORK = "charge-refresh-now"
 
-    /** Fifteen minutes is WorkManager's floor, and reads a cache, not the car. */
+    /** Fifteen minutes is WorkManager's floor, and no read reaches the car. */
     private const val REFRESH_MINUTES = 15L
 
     private val networkRequired = Constraints.Builder()
@@ -155,12 +155,12 @@ class ChargeWidgetProvider : AppWidgetProvider() {
           },
         )
         // A stale number is worth keeping on screen, but only next to its age.
-        return if (reading.hasReading) "$reason · ${age(reading.fetchedAt)}" else reason
+        return if (reading.hasReading) "$reason · ${age(reading.asOf)}" else reason
       }
 
       if (!reading.hasReading) return context.getString(R.string.never_fetched)
       if (reading.charging) return context.getString(R.string.charging)
-      if (reading.isStale()) return context.getString(R.string.as_of, age(reading.fetchedAt))
+      if (reading.isStale()) return context.getString(R.string.as_of, age(reading.asOf))
       return range(context, reading.rangeKm) ?: context.getString(R.string.no_range)
     }
 

@@ -1,14 +1,14 @@
 import { useSyncExternalStore } from 'react'
 import { TARIFF_CHANGED, getTariff, type Tariff } from '../tariff'
 
+// One event covers both a change made here and one made in another tab: the
+// tariff lives in the shared settings blob, and api/sharedSettings.ts
+// republishes a cross-tab write of the mirror as this same event. Listening
+// for `storage` directly here would only fire the subscriber — getTariff reads
+// the blob's in-memory snapshot, which that event does not by itself refresh.
 function subscribe(onChange: () => void): () => void {
   window.addEventListener(TARIFF_CHANGED, onChange)
-  // Also react to a change made in another tab or window.
-  window.addEventListener('storage', onChange)
-  return () => {
-    window.removeEventListener(TARIFF_CHANGED, onChange)
-    window.removeEventListener('storage', onChange)
-  }
+  return () => window.removeEventListener(TARIFF_CHANGED, onChange)
 }
 
 /**

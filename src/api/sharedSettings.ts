@@ -35,10 +35,33 @@ function readMirror(): SharedSettingsBlob {
 
 let cache: SharedSettingsBlob = readMirror()
 
-function commit(next: SharedSettingsBlob): void {
+/** Adopts a blob as the current one and tells the app, without writing it. */
+function publish(next: SharedSettingsBlob): void {
   cache = next
-  localStorage.setItem(LS_MIRROR, JSON.stringify(next))
   window.dispatchEvent(new Event(SHARED_SETTINGS_CHANGED))
+}
+
+/**
+ * Adopts a blob and mirrors it to disk.
+ *
+ * The write is allowed to fail. A store that is full, or switched off — Safari
+ * in private mode throws on every setItem — costs this app its instant offline
+ * open and nothing else. It used to cost far more than that: `cache` was
+ * already updated when the throw happened, so the change was live in memory but
+ * the event announcing it was never dispatched and patchSharedSettings rejected
+ * into callers that mostly do not await it. One unwritable store turned every
+ * settings change into a silent no-op with an unhandled rejection behind it.
+ *
+ * Same stance as api/snapshot.ts, which has always treated its own write as a
+ * cache rather than as the record.
+ */
+function commit(next: SharedSettingsBlob): void {
+  try {
+    localStorage.setItem(LS_MIRROR, JSON.stringify(next))
+  } catch {
+    // Still live in memory, and still on its way to the store.
+  }
+  publish(next)
 }
 
 /** Synchronous snapshot — the local mirror, which is why every read in this
@@ -127,5 +150,28 @@ export function startSharedSettingsSync(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
     if (Date.now() - lastRefresh > REFRESH_THROTTLE_MS) refresh()
+  })
+
+  /*
+   * A second tab, or a second window of the installed app, writing the mirror.
+   * `storage` only fires in the *other* documents on this origin, so this never
+   * has to filter out this tab's own commit.
+   *
+   * Without it the in-memory snapshot outlived the change. getSharedSettings is
+   * what every reader in the app is built on — the VIN, the poll interval, the
+   * tariff, the free sessions, the dashboard order — and it hands back `cache`,
+   * not the disk, so a rate edited in one tab left the other tab pricing
+   * sessions on the old one until it was reloaded. The hooks behind those
+   * readers were already listening for `storage` themselves, waiting for a
+   * re-read that nothing was doing.
+   *
+   * `key` is null when another tab calls localStorage.clear(), which is a
+   * change to the mirror like any other.
+   */
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && event.key !== LS_MIRROR) return
+    // Adopted, not committed: the disk is where this came from, and writing it
+    // back would be a round trip nobody asked for.
+    publish(readMirror())
   })
 }

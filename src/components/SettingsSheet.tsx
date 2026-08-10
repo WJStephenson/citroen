@@ -86,14 +86,20 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
     const wanted = { ...pushEvents, [kind]: !pushEvents[kind] }
     setPushBusy(true)
     try {
-      const applied = await setPushEvents(wanted)
+      const { events: applied, problem } = await setPushEvents(wanted)
       setPushEventsState(applied)
-      if (applied[kind] !== wanted[kind]) {
-        // Only ever happens one way: the permission prompt was denied or
-        // dismissed, so a switch the user just turned on came back off.
+      const label = kind === 'start' ? 'charging starts' : 'charging finishes'
+      if (problem === 'denied') {
         setNotice('Notification permission was denied — allow it in the browser/OS settings to turn this on.')
+      } else if (problem === 'unsaved') {
+        // The switch is set on this phone, and the watcher that does the
+        // sending reads the shared list, which never got it. Said plainly
+        // rather than confirmed, for the same reason Save refuses to reload
+        // past an unreachable store.
+        setNotice(
+          'Set on this phone, but the settings store could not be reached — nothing will be sent until this saves. Try again when you are back on the network.',
+        )
       } else {
-        const label = kind === 'start' ? 'charging starts' : 'charging finishes'
         setNotice(
           applied[kind]
             ? `This device will get a notification when ${label}.`

@@ -172,6 +172,29 @@ export async function currentPushEvents(): Promise<PushEvents> {
 }
 
 /**
+ * How a change to the switches came out.
+ *
+ * The switches used to answer with a bare PushEvents, which could only say
+ * "not what you asked for" and left the sheet to assume the one reason it knew
+ * about. There are two, and they need different words:
+ *
+ *   'denied'  — the permission prompt was refused or dismissed. Nothing was
+ *               subscribed; the switches are off and only the browser's own
+ *               settings can change that.
+ *   'unsaved' — this browser is subscribed, but the shared list is where the
+ *               server-side watcher reads *who to notify* from, and that write
+ *               did not reach the store. The switch is on locally and nothing
+ *               will actually be sent, which is precisely the failure the
+ *               Settings sheet already guards the VIN and poll interval
+ *               against.
+ */
+export interface PushOutcome {
+  /** What this device is set to now. */
+  events: PushEvents
+  problem: 'denied' | 'unsaved' | null
+}
+
+/**
  * Requests notification permission and subscribes this browser, adding it
  * to the shared list watcher.py reads. A device re-subscribing (its old
  * endpoint may have rotated) replaces its own prior entry by matching the
@@ -179,33 +202,54 @@ export async function currentPushEvents(): Promise<PushEvents> {
  * unsubscribed a stale one, which the PushManager does implicitly on
  * subscribe() if one already existed for this registration.
  *
- * Returns false rather than throwing on a denied/dismissed permission
- * prompt — that is an ordinary outcome the caller shows as "off", not an
- * error.
+ * Reports a denied/dismissed permission prompt rather than throwing on it —
+ * that is an ordinary outcome the caller shows as "off", not an error.
  */
-export async function subscribeToPush(events: PushEvents): Promise<boolean> {
-  if (!isPushSupported()) return false
+export async function subscribeToPush(events: PushEvents): Promise<PushOutcome> {
+  if (!isPushSupported()) return { events: NO_PUSH_EVENTS, problem: null }
   const permission = await Notification.requestPermission()
-  if (permission !== 'granted') return false
+  if (permission !== 'granted') return { events: NO_PUSH_EVENTS, problem: 'denied' }
 
   const registration = await navigator.serviceWorker.ready
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: applicationServerKey(VAPID_PUBLIC_KEY),
   })
-  const json = { ...(subscription.toJSON() as StoredSubscription), events }
-  const next = [...storedSubscriptions().filter((s) => s.endpoint !== json.endpoint), json]
-  patchSharedSettings({ pushSubscriptions: next })
-  return true
+  return { events, problem: (await store(subscription, events)) ? null : 'unsaved' }
 }
 
-/** Unsubscribes this browser and drops it from the shared list. */
+/**
+ * Unsubscribes this browser and drops it from the shared list.
+ *
+ * The list write is not worth reporting on: the browser's subscription is
+ * already gone by then, so nothing can be delivered whatever the list still
+ * says, and the watcher prunes an endpoint the push service answers 404/410
+ * for on its next round (deploy/charge_notify.py). Off is off either way.
+ */
 export async function unsubscribeFromPush(): Promise<void> {
   const subscription = await currentSubscription()
   if (!subscription) return
   const endpoint = subscription.endpoint
   await subscription.unsubscribe()
-  patchSharedSettings({ pushSubscriptions: storedSubscriptions().filter((s) => s.endpoint !== endpoint) })
+  void patchSharedSettings({
+    pushSubscriptions: storedSubscriptions().filter((s) => s.endpoint !== endpoint),
+  })
+}
+
+/**
+ * Puts this browser's entry into the shared list, rebuilt from the live
+ * subscription rather than patched in place — so a device whose entry went
+ * missing (another phone pruned it as expired) puts itself back.
+ *
+ * Resolves false when the store did not take it, which is the whole point of
+ * awaiting: the list is the only thing that decides who gets notified, and a
+ * switch that reported "on" off the back of a write nobody received was
+ * promising a notification that could never arrive.
+ */
+function store(subscription: PushSubscription, events: PushEvents): Promise<boolean> {
+  const json = { ...(subscription.toJSON() as StoredSubscription), events }
+  const next = [...storedSubscriptions().filter((s) => s.endpoint !== json.endpoint), json]
+  return patchSharedSettings({ pushSubscriptions: next })
 }
 
 /**
@@ -214,25 +258,18 @@ export async function unsubscribeFromPush(): Promise<void> {
  * the permission prompt, and turning the last one off unsubscribes outright
  * rather than leaving a subscription behind that nothing would ever send to.
  *
- * Returns what is actually in effect afterwards, which is not always what
- * was asked for — a denied permission prompt leaves both off.
+ * Reports what is actually in effect afterwards, which is not always what was
+ * asked for — see PushOutcome.
  */
-export async function setPushEvents(events: PushEvents): Promise<PushEvents> {
+export async function setPushEvents(events: PushEvents): Promise<PushOutcome> {
   if (!events.start && !events.finish) {
     await unsubscribeFromPush()
-    return NO_PUSH_EVENTS
+    return { events: NO_PUSH_EVENTS, problem: null }
   }
 
   const subscription = await currentSubscription()
-  if (!subscription) {
-    return (await subscribeToPush(events)) ? events : NO_PUSH_EVENTS
-  }
+  if (!subscription) return subscribeToPush(events)
 
-  // Already subscribed: only the stored preference changes. The entry is
-  // rebuilt from the live subscription rather than patched in place, so a
-  // device whose entry went missing from the shared list puts itself back.
-  const json = { ...(subscription.toJSON() as StoredSubscription), events }
-  const next = [...storedSubscriptions().filter((s) => s.endpoint !== json.endpoint), json]
-  patchSharedSettings({ pushSubscriptions: next })
-  return events
+  // Already subscribed: only the stored preference changes.
+  return { events, problem: (await store(subscription, events)) ? null : 'unsaved' }
 }

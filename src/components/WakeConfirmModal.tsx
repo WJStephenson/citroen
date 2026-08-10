@@ -1,3 +1,6 @@
+import { useRef } from 'react'
+import { useDialog } from '../hooks/useDialog'
+
 interface Props {
   onConfirm: () => void
   onCancel: () => void
@@ -22,13 +25,20 @@ interface Props {
  * wake-up can fix, and if it is not old, this dialog does not appear.
  */
 export function WakeConfirmModal({ onConfirm, onCancel, onReadOnly, reportedAgo }: Props) {
+  const dialog = useRef<HTMLDivElement>(null)
+  // Escape cancels. On a dialog whose other two buttons both spend something —
+  // one the 12V battery, one a read — the way out has to be the easy one.
+  useDialog(dialog, onCancel)
+
   return (
     <div className="sheet-backdrop" onClick={onCancel} role="presentation">
       <div
+        ref={dialog}
         className="sheet"
         role="alertdialog"
         aria-modal="true"
         aria-label="Confirm wake-up"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <h2>Wake the car?</h2>

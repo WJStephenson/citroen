@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { MIN_POLL_MINUTES, getPollMinutes, getVin, setPollMinutes, setVin } from '../config'
+import { useDialog } from '../hooks/useDialog'
 import { useSheetDismiss } from '../hooks/useSheetDismiss'
 import { useTariff } from '../hooks/useTariff'
 import { useTheme } from '../hooks/useTheme'
@@ -62,6 +63,9 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const theme = useTheme()
   const tariff = useTariff()
   const sheet = useSheetDismiss(onClose)
+  // Escape, focus and the tab ring — the sheet and the drag-to-dismiss gesture
+  // share one element, so they share its ref.
+  useDialog(sheet.sheetRef, onClose)
 
   useEffect(() => {
     let cancelled = false
@@ -182,6 +186,7 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
+        tabIndex={-1}
         style={{ '--sheet-offset': `${sheet.offset}px` } as CSSProperties}
         onClick={(event) => event.stopPropagation()}
         {...sheet.handlers}

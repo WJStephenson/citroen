@@ -65,9 +65,15 @@ async function cacheFirst(request, cacheName, { revalidate }) {
   const cache = await caches.open(cacheName)
   const cached = await cache.match(request, { ignoreSearch: false })
 
+  // The put is awaited, not fired off. notifyIfShellChanged reads the entry
+  // back out of the cache to compare it against what was served, and an
+  // un-awaited put is a race that read loses silently: it returns the *old*
+  // body, the two compare equal, and the "new version is ready" notice never
+  // appears — leaving the app pinned to a stale shell until some later launch
+  // happens to win the same race.
   const network = fetch(request)
-    .then((response) => {
-      if (response.ok && response.type === 'basic') cache.put(request, response.clone())
+    .then(async (response) => {
+      if (response.ok && response.type === 'basic') await cache.put(request, response.clone())
       return response
     })
     .catch(() => undefined)
@@ -86,7 +92,9 @@ async function cacheFirst(request, cacheName, { revalidate }) {
  */
 async function notifyIfShellChanged(request, cached, cache) {
   const updated = await cache.match(request)
-  if (!updated || updated === cached) return
+  // cache.match always mints a fresh Response, so the bodies are the only
+  // thing that can say whether this is the same shell.
+  if (!updated) return
   const [a, b] = await Promise.all([cached.clone().text(), updated.clone().text()])
   if (a === b) return
   const clients = await self.clients.matchAll({ type: 'window' })

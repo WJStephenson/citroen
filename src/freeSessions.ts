@@ -33,10 +33,6 @@ export function getFreeSessions(): number[] {
   return cache
 }
 
-export function isFreeSession(startedAt: Date | null): boolean {
-  return startedAt !== null && getFreeSessions().includes(startedAt.getTime())
-}
-
 export function setFreeSession(startedAt: Date, free: boolean): void {
   const key = startedAt.getTime()
   const current = getFreeSessions()

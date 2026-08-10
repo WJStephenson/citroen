@@ -108,9 +108,3 @@ export function formatEfficiency(
 export function isPlausibleAuxVoltage(volts: number | null): boolean {
   return volts !== null && volts >= 10 && volts <= 15.5
 }
-
-export function formatTemperature(celsius: number | null, unit: TemperatureUnit): string {
-  if (celsius === null) return '—'
-  const value = unit === 'F' ? celsius * 1.8 + 32 : celsius
-  return `${value.toFixed(1)}°${unit}`
-}

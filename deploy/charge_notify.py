@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Watches psa_car_controller for a charging session starting, and for one
-reaching its setpoint, and pushes a Web Push notification to every phone
-subscribed to that event via the PWA's Settings sheet.
+Watches psa_car_controller and does two things nobody's phone can be relied on
+to do: pushes the charging notifications, and re-arms the car's delayed-charge
+schedule every time the car is unplugged.
 
 Runs independently of any browser tab being open — that's the whole point.
 The PWA's own poll loop (useVehicle.ts) deliberately suspends whenever the
@@ -49,12 +49,45 @@ There are two notifications, each sent only to the devices that asked for it:
     started) rather than on a specific status transition, since that is
     robust to a missed poll or a watcher restart mid-session in a way that
     edge-detection is not.
+
+And one thing is *written*, which makes this the only part of the project
+outside the PWA's own buttons that commands the car:
+
+  - GET {PSACC_URL}/charge_now/{vin}/0 on the poll where the car is first
+    seen unplugged, re-sending the stored hour as DELAYED_CHARGE.
+
+    A deferred start is two settings in the car and only one of them lasts.
+    The hour survives everything and is reported back in next_delayed_time;
+    the charge *type* does not survive being unplugged, so a schedule set on
+    Monday is honoured for Monday's charge and then quietly dropped, while
+    every reading — this app, the car's own dashboard, Stellantis's — goes on
+    showing the hour as though it were still in force. Nothing can be done
+    about that in the car: /VehCharge carries one hour and one type and has
+    no notion of a repeating program (see the README). So it is re-sent
+    instead, once per unplug, which is what turns a schedule that lasts one
+    charge into one that lasts.
+
+    On unplug, deliberately, and not when the car is plugged back in. Both
+    moments would work, but only this one leaves the last word with whoever
+    is standing at the car: press the charge-now button on the vehicle (or
+    Charge now in the app) after plugging in and nothing here will contradict
+    it, because by then the re-arm has already happened. Re-arming at plug-in
+    would undo that override a few minutes after it was made, which is the
+    one behaviour worse than the problem being fixed.
+
+    Two guards. A car reporting no stored hour at all ("PT0S") has nothing to
+    re-arm and is left alone, rather than being sent the 00:00 that
+    charge_now would otherwise read out of PSACC's cache. And the whole
+    behaviour is off if the shared settings say so — `rearmScheduleOnUnplug`
+    (Settings → Charging), which defaults to on when absent, matching
+    getRearmOnUnplug in src/config.ts.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import traceback
 import urllib.error
@@ -90,13 +123,33 @@ NEW_SESSION_DROP = 5
 # Matches CHARGING_STATUS in api/client.ts.
 ACTIVE_STATUSES = {"inprogress", "quickcharge"}
 DONE_STATUSES = {"finished"}
+# The one status that means no cable. Every other status the bridge reports —
+# charging, stopped, finished, and anything unforeseen — means plugged in, so
+# the test is written that way round: an unknown status must not read as
+# "unplugged" and fire a re-arm at a car that is sitting on a charger.
+UNPLUGGED_STATUS = "disconnected"
+# A re-arm that the bridge refuses, or that cannot be sent at all, is retried
+# on the following polls — a car unplugged and driven away is a car whose
+# radio may not answer for a minute. It is not retried forever: after this
+# many failures the log says so and the unplug is let go, rather than the
+# watcher spending the week sending commands into a car that is not listening.
+MAX_REARM_ATTEMPTS = 3
 
 
 def log(message: str) -> None:
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {message}", flush=True)
 
 
-def http_get(url: str) -> dict:
+def http_get(url: str) -> dict | bool:
+    """
+    The bridge's answer, parsed.
+
+    Not always an object: the read routes return one, but /charge_now answers
+    a bare `true` (jsonify of RemoteClient.charge_now's return value) — and
+    answers a *dict* carrying an "error" key for the failures it reports with
+    an HTTP 200. Callers that read fields check the shape; see rearm_schedule
+    for the one that has to tell those two answers apart.
+    """
     with urllib.request.urlopen(url, timeout=REQUEST_TIMEOUT_S) as response:
         return json.loads(response.read().decode())
 
@@ -129,15 +182,32 @@ def save_state(state: dict) -> None:
 
 def fetch_settings() -> dict:
     try:
-        return http_get(f"{SETTINGS_URL}/")
+        settings = http_get(f"{SETTINGS_URL}/")
+        return settings if isinstance(settings, dict) else {}
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         log("could not reach settings_store, skipping this poll")
         return {}
 
 
-def fetch_charging(vin: str) -> tuple[str | None, float | None]:
+def hour_from_duration(value: object) -> str | None:
     """
-    (status, level) from get_vehicleinfo, lowercased status.
+    The stored delayed-charge hour as HH:MM, from the PT#H#M shape
+    next_delayed_time actually carries — "PT23H" is the hour 23:00, not a time
+    23 hours away. Same parse, and the same "PT0S" case, as hhmmFromDuration in
+    src/api/client.ts: a duration carrying neither hours nor minutes is a car
+    holding no hour at all, which is not midnight.
+    """
+    if not isinstance(value, str):
+        return None
+    match = re.match(r"^PT(?:(\d+)H)?(?:(\d+)M)?", value)
+    if not match or (match[1] is None and match[2] is None):
+        return None
+    return f"{int(match[1] or 0):02d}:{int(match[2] or 0):02d}"
+
+
+def fetch_charging(vin: str) -> tuple[str | None, float | None, str | None]:
+    """
+    (status, level, stored delayed hour) from get_vehicleinfo, lowercased status.
 
     Read WITHOUT from_cache, which it used to use. The cached read returns
     psa_car_controller's in-memory copy, and nothing refreshes that copy unless
@@ -147,24 +217,80 @@ def fetch_charging(vin: str) -> tuple[str | None, float | None]:
     exists to announce. Uncached asks Stellantis instead, which still never
     touches the car (see src/api/client.ts::fetchVehicleState) and is the
     difference between watching the car and watching a snapshot of it.
+
+    Uncached matters for the re-arm too, and not only for freshness: an
+    uncached read is what assigns psa_car_controller's own `car.status`
+    (psacc/application/psa_client.py), and /charge_now reads the hour it
+    re-sends straight out of that copy. So this read, every poll, is also what
+    keeps the hour the bridge would send in step with the one the car holds.
     """
     info = http_get(f"{PSACC_URL}/get_vehicleinfo/{vin}")
+    if not isinstance(info, dict):
+        return (None, None, None)
     energies = info.get("energy") or [{}]
     energy = next((e for e in energies if str(e.get("type", "")).lower() == "electric"), energies[0])
     charging = energy.get("charging") or {}
     status = charging.get("status")
-    return (str(status).lower() if status else None, energy.get("level"))
+    return (
+        str(status).lower() if status else None,
+        energy.get("level"),
+        hour_from_duration(charging.get("next_delayed_time")),
+    )
 
 
 def fetch_target(vin: str) -> float:
     """The percentage PSACC will stop the charge at, or 100 if uncapped/unconfigured."""
     charge_control = http_get(f"{PSACC_URL}/charge_control?vin={vin}")
-    if charge_control.get("error"):
+    if not isinstance(charge_control, dict) or charge_control.get("error"):
         return 100.0
     threshold = charge_control.get("percentage_threshold")
     if isinstance(threshold, (int, float)) and 0 < threshold < 100:
         return float(threshold)
     return 100.0
+
+
+def rearm_enabled(settings: dict) -> bool:
+    """
+    Whether to re-arm the schedule on unplug.
+
+    Absent means on. The setting exists to be turned *off* — by someone whose
+    charger does its own scheduling, or who wants the car left exactly as the
+    last person set it — and a household that has never opened the switch has
+    no stored value for it. Same default as getRearmOnUnplug in src/config.ts;
+    the two have to agree or the switch would show a state the server isn't in.
+    """
+    value = settings.get("rearmScheduleOnUnplug")
+    return value is not False
+
+
+def rearm_schedule(vin: str) -> bool:
+    """
+    Puts the car back on DELAYED_CHARGE at its stored hour. True if the bridge
+    took the command.
+
+    /charge_now/{vin}/0 re-sends the hour the bridge is holding for this car
+    with the type set back to delayed — one MQTT message, the same one the
+    tile's Schedule button sends. It does not wake the car the way /wakeup
+    does and costs nothing at Stellantis beyond the message itself.
+
+    "Took the command" is as much as can ever be claimed here. The bridge
+    answers `true` as soon as it has published, the car acts a minute or so
+    later, and no endpoint anywhere reports the charge type back — so there is
+    nothing to read to confirm it. What can be seen is the car's behaviour at
+    the next plug-in, which is why that moment gets a log line of its own.
+    """
+    try:
+        answer = http_get(f"{PSACC_URL}/charge_now/{vin}/0")
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as ex:
+        log(f"re-arm could not be sent: {ex}")
+        return False
+    # PSACC reports several failures as a 200 carrying {"error": ...} — "VIN
+    # not in list", rate limiting — rather than as an HTTP error, exactly as
+    # api/client.ts::command has to allow for.
+    if isinstance(answer, dict) and answer.get("error"):
+        log(f"re-arm refused by the bridge: {answer['error']}")
+        return False
+    return True
 
 
 def send_push(subscription: dict, payload: dict) -> bool:
@@ -242,13 +368,13 @@ def poll_once(state: dict) -> dict:
         # someone does.
         subscriptions = []
 
-    status, level = fetch_charging(vin)
+    status, level, stored_hour = fetch_charging(vin)
     target = fetch_target(vin)
 
     session = state.get(vin, {"notified": False, "last_level": None})
     last_level = session.get("last_level")
 
-    new_session = status == "disconnected" or (
+    new_session = status == UNPLUGGED_STATUS or (
         last_level is not None and level is not None and level < last_level - NEW_SESSION_DROP
     )
     if new_session:
@@ -313,9 +439,97 @@ def poll_once(state: dict) -> dict:
         )
         session["notified"] = True
 
+    session = rearm_on_unplug(vin, status, stored_hour, session, rearm_enabled(settings))
+
     session["last_level"] = level
     state[vin] = session
     return state
+
+
+def rearm_on_unplug(
+    vin: str, status: str | None, stored_hour: str | None, session: dict, enabled: bool
+) -> dict:
+    """
+    Re-sends the stored hour as DELAYED_CHARGE once per unplug, so the schedule
+    is in force again before the car is next plugged in. See the module
+    docstring for why unplugging is the moment chosen.
+
+    An edge, like the "started charging" notification and for the same reason:
+    `plugged` is None until this watcher has seen the car at least once, and no
+    re-arm is sent on that first poll. A watcher restarting next to a car that
+    has been sitting unplugged on the drive since Tuesday has no idea whether
+    the schedule was already re-armed when it was unplugged, and sending a
+    command to find out is not free.
+
+    Retries live here rather than inside rearm_schedule because the retry
+    interval that makes sense is the poll interval — a car that has just been
+    unplugged is often being driven away, and five minutes later it is parked
+    somewhere with a better signal.
+    """
+    if status is None:
+        # The car reported no charging status at all. That is not the same as
+        # reporting no cable, and must not be read as one — whatever the plug
+        # state was, it still is, and a poll that learned nothing is not an
+        # unplug.
+        return session
+
+    plugged = status != UNPLUGGED_STATUS
+    was_plugged = session.get("plugged")
+    session["plugged"] = plugged
+
+    if plugged:
+        if was_plugged is False:
+            # The one line that says whether any of this worked. If the car
+            # then starts charging outside its window, the "started charging"
+            # line follows within a poll or two and the pair of them is the
+            # evidence that the re-arm did not stick.
+            log(
+                f"{vin} plugged in (status {status}); schedule last re-armed "
+                f"{session.get('rearmed_at') or 'never'}"
+            )
+        # Whatever happens from here is this plug-in's business; the next
+        # unplug gets its own re-arm and its own attempts.
+        session["rearm_due"] = False
+        session["rearm_attempts"] = 0
+        return session
+
+    if was_plugged:
+        log(f"{vin} unplugged")
+        session["rearm_due"] = True
+        session["rearm_attempts"] = 0
+
+    if not session.get("rearm_due"):
+        return session
+
+    if not enabled:
+        # Off in Settings. Dropped rather than held, so turning it back on
+        # mid-week does not fire a command about an unplug from days ago.
+        session["rearm_due"] = False
+        return session
+
+    if stored_hour is None:
+        # Nothing to put the car back on. charge_now would still send
+        # something — PSACC reads the hour out of its own cached status and a
+        # car holding none parses as [0, 0] — and midnight is a schedule
+        # nobody asked for.
+        log(f"{vin} holds no delayed-charge hour, nothing to re-arm")
+        session["rearm_due"] = False
+        return session
+
+    session["rearm_attempts"] = session.get("rearm_attempts", 0) + 1
+    if rearm_schedule(vin):
+        log(f"{vin} re-armed on {stored_hour} for the next charge")
+        session["rearm_due"] = False
+        session["rearmed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    elif session["rearm_attempts"] >= MAX_REARM_ATTEMPTS:
+        log(
+            f"{vin} could not be re-armed after {MAX_REARM_ATTEMPTS} attempts — "
+            f"the car will charge as soon as it is plugged in unless {stored_hour} "
+            "is set again from the app"
+        )
+        session["rearm_due"] = False
+
+    return session
 
 
 def main() -> None:

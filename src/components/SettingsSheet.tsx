@@ -1,5 +1,13 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { MIN_POLL_MINUTES, getPollMinutes, getVin, setPollMinutes, setVin } from '../config'
+import {
+  MIN_POLL_MINUTES,
+  getPollMinutes,
+  getRearmOnUnplug,
+  getVin,
+  setPollMinutes,
+  setRearmOnUnplug,
+  setVin,
+} from '../config'
 import { useDialog } from '../hooks/useDialog'
 import { useSheetDismiss } from '../hooks/useSheetDismiss'
 import { useTariff } from '../hooks/useTariff'
@@ -43,6 +51,10 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
   const [method, setMethod] = useState(configuredMethod())
   const [pin, setPinValue] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  // Acted on by the server, not by this app — see getRearmOnUnplug — so it is
+  // applied on the spot rather than waiting for Save's reload, which exists to
+  // make this app's own hooks re-read the VIN and the poll interval.
+  const [rearm, setRearmValue] = useState(getRearmOnUnplug())
   // Save is a round trip to the store now, not a local write — see save().
   const [saving, setSaving] = useState(false)
   // Which notifications *this* browser is signed up for — checked async
@@ -115,6 +127,28 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
     } finally {
       setPushBusy(false)
     }
+  }
+
+  /*
+   * The switch moves first and is put back if the store refuses it. Nothing
+   * else reads this setting on this device, so an optimistic switch that
+   * silently failed to save would leave the phone showing a rule the server
+   * has never heard of — the same failure the push switches report rather
+   * than swallow.
+   */
+  const toggleRearm = async () => {
+    const wanted = !rearm
+    setRearmValue(wanted)
+    if (await setRearmOnUnplug(wanted)) {
+      setNotice(
+        wanted
+          ? 'The schedule will be put back in force each time the car is unplugged.'
+          : 'The schedule will be left as it is — the car will charge on plugging in once its current schedule has been used.',
+      )
+      return
+    }
+    setRearmValue(!wanted)
+    setNotice('Could not reach the settings store — that switch was not saved.')
   }
 
   /*
@@ -223,6 +257,30 @@ export function SettingsSheet({ onClose, onLockChanged }: Props) {
           itself — the floor of {MIN_POLL_MINUTES} minutes is there to stay a polite guest on
           their API, not to protect the 12V battery. Only “Wake the car”, offered on the dashboard
           when a reading has gone old, reaches the vehicle.
+        </p>
+
+        <h3>Charging</h3>
+        <div className="unit-row">
+          <span>Re-arm the schedule when unplugged</span>
+          <button
+            type="button"
+            className={`switch ${rearm ? 'is-on' : ''}`}
+            role="switch"
+            aria-checked={rearm}
+            aria-label="Put the charging schedule back in force each time the car is unplugged"
+            onClick={() => void toggleRearm()}
+          >
+            <span className="switch-thumb" />
+          </button>
+        </div>
+        <p className="note">
+          The car keeps the start time but forgets to <em>use</em> it once the cable comes out, so
+          a schedule set today is honoured for today's charge and then quietly dropped — while the
+          time goes on showing everywhere, including on the car's own dashboard. This puts it back
+          each time the car is unplugged, so the window is in force before the cable next goes in.
+          It runs on the server, whether or not anyone has the app open, and at the moment you
+          unplug rather than when you plug back in — so <em>Charge now</em>, here or at the car, is
+          never undone.
         </p>
 
         <h3>Notifications</h3>

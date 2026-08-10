@@ -80,7 +80,7 @@ docker exec <nginx-container> wget -qO- http://settings_store:8090/
 
 An empty `{}` is a healthy answer — it just means nothing has been saved yet.
 
-## 2c. Start the charging notifications (optional)
+## 2c. Start the charge watcher (optional, but it does more than notify)
 
 Push notifications for a charge starting, and for one reaching its setpoint,
 delivered even with the phone asleep and no tab open — see charge_notify.py
@@ -89,6 +89,16 @@ something the PWA's own poll loop can catch, and why "the setpoint" means
 whatever PSACC's charge control is configured to (percentage_threshold), not
 a value configured twice. Each phone picks which of the two it wants, in
 Settings; this one service covers both.
+
+The same service also **re-arms the charging schedule every time the car is
+unplugged**, which is the only thing that makes a start hour survive past its
+first charge — the car keeps the hour but not the setting that honours it.
+That part sends one command to the car per unplug (`/charge_now/{vin}/0`),
+making this the one service here that is not purely a reader. It is on by
+default and turned off in Settings → Charging; the reasoning, including why
+unplugging rather than plugging in is the moment it acts, is at the top of
+charge_notify.py. Run `python3 deploy/charge_notify.test.py` after changing
+that logic — stdlib only, no network, no bridge.
 
 Generate a keypair (`generate_vapid_keys.py` explains the one-liner), then on
 the server:

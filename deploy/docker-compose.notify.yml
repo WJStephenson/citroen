@@ -1,7 +1,10 @@
-# "Notify when charging finishes" — watches psa_car_controller and pushes to
-# every phone subscribed via the PWA's Settings sheet. See charge_notify.py
-# for what it actually does and why it has to be a separate always-running
-# process rather than something the PWA's own poll loop can catch.
+# The always-running half of the app: watches psa_car_controller, pushes the
+# charging notifications to every phone subscribed via the PWA's Settings
+# sheet, and re-arms the car's delayed-charge schedule each time the car is
+# unplugged (Settings → Charging, on unless turned off). See charge_notify.py
+# for what it actually does, and why neither job can be something the PWA's
+# own poll loop catches — nobody has a tab open at midnight, or at the moment
+# they walk away from the car with the cable in their hand.
 #
 # Needs charge_notify.py copied alongside this file on the server (stdlib +
 # one pip install at container start, no image to build — same as
@@ -51,6 +54,11 @@ services:
       # the status they hold, charge_control is local to the bridge. So the
       # only thing this interval trades against is politeness to someone
       # else's API, not the 12V battery.
+      #
+      # It is also how long an unplug can go unnoticed before the schedule is
+      # re-armed, which does not matter: what has to be true is that the car
+      # is back on its schedule before it is next plugged in, and five minutes
+      # is not the gap between two charges.
       - POLL_SECONDS=300
 
     command: sh -c "pip install --no-cache-dir --quiet pywebpush && python -u charge_notify.py"

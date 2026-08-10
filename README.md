@@ -87,6 +87,15 @@ only — you already have the domain, tunnel, and nginx container.
   for 23:00", "On immediate charge — 23:00 stays stored but unused") rather than
   asserting a setting nothing reports. See
   [Things the bridge does not report back](#things-the-bridge-does-not-report-back).
+- **A schedule that lasts more than one charge** — the car drops back to
+  immediate charging when the cable comes out, keeping the hour and forgetting
+  to use it, so a window set on Monday is honoured once and then silently isn't.
+  Nothing can fix that in the car; it is re-sent instead, by the server-side
+  watcher, on the poll where the car is first seen unplugged — so the schedule
+  is back in force before the cable next goes in. On unplug and not on plug-in,
+  which is what leaves *Charge now* — in the app or at the car — as the last
+  word for the charge you actually want immediately. Settings → Charging turns
+  it off. See [The schedule only lasts one charge](#the-schedule-only-lasts-one-charge).
 - **Lights** and **Horn** — one tile each, because they are not the same kind of
   decision: the lights are harmless and fire on the first tap, the horn asks for
   a second one.
@@ -454,6 +463,65 @@ displaying:
 The charge-type switch on the tile is the direct way back, and
 `observeChargeType` (`src/chargeWindow.ts`) is how the app tells you it is
 needed without a field to read.
+
+### The schedule only lasts one charge
+
+The type is not just invisible — it is short-lived, and in a way that makes a
+charging window look broken rather than absent. **The car does not keep
+`DELAYED_CHARGE` across an unplug.** Set a start hour, and tonight's charge
+waits for it; unplug in the morning and the car is back on immediate, so the
+next time it is plugged in it starts at once. The hour is untouched
+throughout, and every reading there is — this app, the bridge, the car's own
+dashboard, Stellantis's app — goes on showing it. The failure and a working
+schedule look identical right up until the car charges at two in the
+afternoon.
+
+Upstream documents the same behaviour from the other side without naming it:
+the way to defeat psa_car_controller's own charge threshold, which works by
+parking the car on `DELAYED_CHARGE`, is to unplug and plug back in
+([discussion #317](https://github.com/flobz/psa_car_controller/discussions/317)).
+That only works because replugging puts the car back on immediate.
+
+**There is nothing to fix in the car or the bridge.** `/VehCharge` carries one
+hour and one type per message (`RemoteClient.veh_charge_request`) and has no
+notion of a repeating program. The car's own weekly charge programs, set on
+the infotainment screen, are the only persistent schedule it has, and no route
+psa_car_controller exposes reaches them. A wall box that does its own
+scheduling is the other way out.
+
+So the schedule is re-sent instead, once per unplug, by `deploy/charge_notify.py`
+— the always-running watcher that also sends the charging notifications, and
+the only part of this project outside the app's own buttons that commands the
+car. It re-sends the stored hour as `DELAYED_CHARGE` (`/charge_now/{VIN}/0`) on
+the poll where the car is first seen unplugged.
+
+**On unplug, deliberately, and not at plug-in.** Both moments would put the
+schedule back; only this one leaves the last word with whoever is standing at
+the car. Plug in and press charge-now — on the vehicle, or on the tile — and
+nothing contradicts it, because the re-arm already happened while the cable
+was out. Re-arming at plug-in would cancel that override a few minutes after
+it was made, which is worse than the problem it fixes.
+
+Three things it will not do. It sends nothing on its first poll, since a
+watcher that has just started next to an unplugged car cannot know whether
+that unplug was already handled. It leaves a car reporting no stored hour
+(`PT0S`) alone rather than sending it the midnight that `charge_now` would
+otherwise read out of PSACC's cache. And it stops after
+`MAX_REARM_ATTEMPTS` failures for one unplug, with a log line saying the car
+will charge on plugging in, rather than spending the week talking to a car
+that is not answering.
+
+Whether the re-arm is *working* is legible in `docker logs charge_notify`
+without any new field to read: each plug-in logs when the schedule was last
+re-armed, and a "started charging" line following it, hours before the window
+opens, would be the car saying the re-arm did not stick. The switch is in
+Settings → Charging (`rearmScheduleOnUnplug`, on unless turned off — the
+default lives in two places, `rearm_enabled` and `getRearmOnUnplug`, and they
+have to agree).
+
+`python3 deploy/charge_notify.test.py` covers the decision: which poll sends a
+command, which sends none, and how failures retry. Standard library, no
+network, no bridge.
 
 ### Pre-conditioning is on/off only
 
@@ -845,9 +913,26 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   bridge's cached reading can be arbitrarily old.
 - The mock was driven to confirm it: repeated reads of both kinds leave
   `updated_at` where it was, and `/wakeup` is the only GET that moves it.
+- The unplug re-arm was tested twice over. `deploy/charge_notify.test.py`
+  covers the decision — 14 cases: the unplug edge sending exactly one command,
+  the first poll after a restart sending none, every fresh unplug getting its
+  own, a plugged-in car being left alone whatever it is doing, a car with no
+  stored hour, the setting turned off (including turning it back on mid-unplug,
+  which must not fire), retries giving up after three failures and stopping at
+  the first success, and an unreadable or unforeseen status not being mistaken
+  for "no cable". Then `poll_once` itself was run against the Python mock with
+  the car left on `IMMEDIATE_CHARGE`: it issued `/charge_now/{VIN}/0` on the
+  unplug and the mock's charge type went back to `Delayed`.
 
-Not verified: the Android unit tests, which cannot resolve the Gradle Android
-plugin in this environment and run in CI instead (`./gradlew test`); the
+Not verified: that the car accepts `DELAYED_CHARGE` while it is unplugged and
+still holds it at the next plug-in, which is the assumption the unplug re-arm
+rests on — it is the same message the tile's Schedule button sends at any other
+time, and the alternative reading (that the car clears the type when the cable
+goes *in* rather than when it comes out) would make the re-arm a no-op. One
+night's `docker logs charge_notify` settles it: a plug-in line followed hours
+before the window by "started charging" is the car saying it did not hold.
+Also not verified: the Android unit tests, which cannot resolve the Gradle
+Android plugin in this environment and run in CI instead (`./gradlew test`); the
 timings above against a live bridge — the read/wake behaviour is established
 from upstream's source, and what remains open is how often *your* car chooses
 to report, which is the thing none of this can change; real-device install and

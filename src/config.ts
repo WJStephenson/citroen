@@ -73,3 +73,27 @@ export function getPollMinutes(): number {
 export function setPollMinutes(minutes: number): Promise<boolean> {
   return patchSharedSettings({ pollMinutes: Math.max(MIN_POLL_MINUTES, Math.round(minutes)) })
 }
+
+/**
+ * Whether the schedule is put back in force each time the car is unplugged.
+ *
+ * Nothing in this app acts on it: the setting is read by the server-side
+ * watcher (deploy/charge_notify.py), which is the only thing awake at the
+ * moment a car is unplugged. It lives here because the switch that sets it
+ * does, and because the two have to agree on what an absent value means —
+ * on, matching rearm_enabled in the watcher. A household that has never
+ * opened the switch has no stored value, and the behaviour it turns off is
+ * the one that makes a start hour mean anything past its first charge.
+ *
+ * Shared rather than per-device for the obvious reason: there is one car, one
+ * schedule, and one watcher acting on it. A per-phone answer would be a
+ * setting three phones could disagree about while the server did one thing.
+ */
+export function getRearmOnUnplug(): boolean {
+  return getSharedSettings().rearmScheduleOnUnplug !== false
+}
+
+/** Resolves once the store has it — see patchSharedSettings. */
+export function setRearmOnUnplug(on: boolean): Promise<boolean> {
+  return patchSharedSettings({ rearmScheduleOnUnplug: on })
+}

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { startSharedSettingsSync } from './api/sharedSettings'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
 
 // Fire-and-forget: the app renders instantly from whatever was last mirrored
@@ -14,6 +15,8 @@ if (!container) throw new Error('#root missing from index.html')
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

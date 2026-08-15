@@ -162,13 +162,21 @@ export default function App() {
   const stale = reportedAgeMs !== null && reportedAgeMs > STALE_AFTER_MINUTES * 60_000
 
   /*
-   * Whether ⟳ should offer a wake-up instead of a read. Only when the car is
-   * demonstrably quiet — a car that reports no timestamp at all is not
-   * evidence of anything, and treating it as stale would turn the refresh
-   * button into a wake-up button permanently, on a payload shape that may
-   * simply not carry `updated_at`.
+   * Whether ⟳ should offer a wake-up instead of a read.
+   *
+   * Normally that is `stale` — the car has a timestamp and it is old. But a
+   * car whose payload never carries `updated_at` has no timestamp to go
+   * stale, which used to mean the app could never judge it and so could never
+   * offer a wake-up either: a reading could sit unchanged for days behind a
+   * button that only ever re-reads the same frozen record. A device that has
+   * gone through at least one real read and still has no timestamp is not
+   * "not evidence of anything" the way the very first load is — it is the
+   * shape confirming itself, so it is treated the same as stale. The
+   * WakeConfirmModal already has copy for this (`reportedAgo` falls back to
+   * "nothing this device has seen"); this is what makes it reachable.
    */
-  const needsWake = stale && waking === null
+  const neverReports = reportedAt === null && vehicle.state !== null
+  const needsWake = (stale || neverReports) && waking === null
 
   /*
    * The canonical layout, which is also the fallback order and the order a

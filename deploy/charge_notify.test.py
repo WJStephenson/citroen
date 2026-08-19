@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Tests for the re-arm half of charge_notify.py, the part that commands the car.
+Tests for the two halves of charge_notify.py with consequences: the re-arm,
+which commands the car, and the charge-location recording, which is the one
+fact about a session that cannot be recovered if this poll gets it wrong.
 
     python deploy/charge_notify.test.py
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+import urllib.error
 from pathlib import Path
 
 if "pywebpush" not in sys.modules:
@@ -154,6 +157,105 @@ class HourParsingTest(unittest.TestCase):
         self.assertIsNone(charge_notify.hour_from_duration(""))
         self.assertIsNone(charge_notify.hour_from_duration(None))
         self.assertIsNone(charge_notify.hour_from_duration(0))
+
+
+class PositionParsingTest(unittest.TestCase):
+    """GeoJSON's [lon, lat] order, and the shapes that are not a position."""
+
+    def test_reads_lat_lon_from_geojson_order(self):
+        info = {"last_position": {"geometry": {"coordinates": [-1.4701, 53.3811, 68]}}}
+        self.assertEqual(charge_notify.position_from_info(info), (53.3811, -1.4701))
+
+    def test_null_island_is_the_no_fix_sentinel(self):
+        info = {"last_position": {"geometry": {"coordinates": [0, 0]}}}
+        self.assertIsNone(charge_notify.position_from_info(info))
+
+    def test_missing_or_malformed_is_no_position(self):
+        self.assertIsNone(charge_notify.position_from_info({}))
+        self.assertIsNone(charge_notify.position_from_info({"last_position": {}}))
+        self.assertIsNone(
+            charge_notify.position_from_info({"last_position": {"geometry": {"coordinates": [1.0]}}})
+        )
+        self.assertIsNone(
+            charge_notify.position_from_info(
+                {"last_position": {"geometry": {"coordinates": ["1.0", "2.0"]}}}
+            )
+        )
+
+
+class ChargeLocationTest(unittest.TestCase):
+    """
+    What gets written to the shared blob on a start edge.
+
+    `http_put` is replaced with a recorder — what matters here is the decision
+    and the payload, not the transport. The dedupe rules have to match
+    src/chargeLocations.ts, since the app appends to the same list.
+    """
+
+    HOME = (53.3811, -1.4701)
+    NOW = 1_700_000_000_000
+
+    def setUp(self) -> None:
+        self.puts: list[dict] = []
+        real_put = charge_notify.http_put
+        charge_notify.http_put = lambda url, body: self.puts.append(body)
+        self.addCleanup(setattr, charge_notify, "http_put", real_put)
+
+    def written(self) -> list[dict]:
+        self.assertEqual(len(self.puts), 1, "exactly one write per recorded charge")
+        return self.puts[0]["chargeLocations"]
+
+    def test_records_the_start(self):
+        charge_notify.record_charge_location({}, self.HOME, self.NOW)
+        self.assertEqual(
+            self.written(), [{"at": self.NOW, "lat": 53.3811, "lon": -1.4701}]
+        )
+
+    def test_no_position_writes_nothing(self):
+        charge_notify.record_charge_location({}, None, self.NOW)
+        self.assertEqual(self.puts, [], "a car with no fix has nothing to record")
+
+    def test_the_same_start_seen_twice_is_recorded_once(self):
+        """The app and this watcher both notice one charge starting."""
+        settings = {"chargeLocations": [{"at": self.NOW - 60_000, "lat": 53.3811, "lon": -1.4701}]}
+        charge_notify.record_charge_location(settings, self.HOME, self.NOW)
+        self.assertEqual(self.puts, [])
+
+    def test_a_different_place_is_a_different_charge(self):
+        """Minutes later and a mile away is a second charge, not a duplicate."""
+        settings = {"chargeLocations": [{"at": self.NOW - 60_000, "lat": 53.40, "lon": -1.50}]}
+        charge_notify.record_charge_location(settings, self.HOME, self.NOW)
+        self.assertEqual(len(self.written()), 2)
+
+    def test_the_same_place_tomorrow_is_a_different_charge(self):
+        yesterday = self.NOW - 24 * 60 * 60 * 1000
+        settings = {"chargeLocations": [{"at": yesterday, "lat": 53.3811, "lon": -1.4701}]}
+        charge_notify.record_charge_location(settings, self.HOME, self.NOW)
+        self.assertEqual(len(self.written()), 2)
+
+    def test_oldest_are_dropped_at_the_cap(self):
+        cap = charge_notify.MAX_CHARGE_LOCATIONS
+        existing = [
+            {"at": self.NOW - (cap - i) * 86_400_000, "lat": 50.0 + i / 1000, "lon": 0.0}
+            for i in range(cap)
+        ]
+        charge_notify.record_charge_location({"chargeLocations": existing}, self.HOME, self.NOW)
+        written = self.written()
+        self.assertEqual(len(written), cap)
+        self.assertEqual(written[-1]["at"], self.NOW)
+        self.assertNotIn(existing[0], written, "the oldest entry is the one that goes")
+
+    def test_junk_entries_are_dropped_rather_than_carried(self):
+        settings = {"chargeLocations": ["nonsense", {"at": "soon"}, {"lat": 1, "lon": 2}]}
+        charge_notify.record_charge_location(settings, self.HOME, self.NOW)
+        self.assertEqual(len(self.written()), 1)
+
+    def test_a_store_that_will_not_take_it_is_not_retried(self):
+        def refuse(url, body):
+            raise urllib.error.URLError("down")
+
+        charge_notify.http_put = refuse
+        charge_notify.record_charge_location({}, self.HOME, self.NOW)  # must not raise
 
 
 class SettingDefaultTest(unittest.TestCase):

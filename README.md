@@ -108,7 +108,11 @@ only — you already have the domain, tunnel, and nginx container.
   arrives for, and the one figure here that does not move when the window does.
   Pick a session, from the chart or from the table, for its detail: where in the
   battery it charged (20→80% is not the same event as 60→100%), how long it
-  took, and what it cost.
+  took, what it cost, and — on a map under the figures — where the car was
+  standing when it started. The bridge does not record that last one, so it is
+  written down as each charge begins; sessions from before that started
+  happening say so rather than showing a blank map. See [Where a charge
+  happened](#where-a-charge-happened-is-not-in-the-bridges-data).
 - **Electricity tariff** — day and night rates in p/kWh plus the hours the night
   rate applies, and each session's cost is split across the two by the time it
   spent in each. The bridge's own flat-rate figure is the fallback. See
@@ -605,6 +609,52 @@ Two caveats:
   are usually set to overlap, but nothing forces that, and the cost is computed
   from when the car actually charged.
 
+### Where a charge happened is not in the bridge's data
+
+`/vehicles/chargings` returns when a session started, what it did to the
+battery, how long it took and what PSACC thinks it cost — and no position.
+`Charging.get_chargings()` has no field for one, and neither does the row
+behind it, so "where did I charge that day" cannot be answered by asking the
+bridge a better question. The only moment the answer exists is the moment the
+charge starts, while `last_position` still describes the car sitting on the
+charger.
+
+So it is written down then, into `chargeLocations` in the shared settings blob
+(`src/chargeLocations.ts`). Two things watch for that moment, because neither
+alone covers it:
+
+- **`deploy/charge_notify.py`**, on the same start edge it already sends the
+  "charging started" push from. This is the one that matters — it runs whether
+  or not anyone's phone is awake, which overnight is the only way the moment
+  gets caught at all.
+- **the app**, on the poll where it first sees the car charging
+  (`src/hooks/useChargeLocationLog.ts`). It only polls while it is on screen,
+  so this covers exactly one case: somebody standing at the car with the
+  dashboard open. Worth having for that case, and it is the whole of the
+  feature for anyone not running the watcher.
+
+Both write the same shape, and both can catch the same start, so an entry
+within 45 minutes and ~33m of an existing one is taken to be that one seen
+twice rather than a second charge. The list is capped at 300 entries, oldest
+dropped first — it is carried in a blob every device fetches at boot.
+
+Matching an entry back to a session is done on time, not on an id, because
+there is no id: a session's only handle is its `start_at`, stamped by the
+bridge's clock, and neither recorder is reading that clock or polling in step
+with it. What makes time enough is that **a charging car is a parked car** — it
+cannot drive off mid-session — so any position observed while a session was
+running is where that session happened. `locationForSession` takes the entries
+falling between the session's start and its finish, padded half an hour at each
+end for clock skew and for the poll that noticed the start a few minutes late,
+and picks the one nearest the start, which is what keeps back-to-back sessions
+from claiming each other's.
+
+Two consequences worth stating plainly. Every session recorded before this
+existed has no location and never will, and the panel says "No location
+recorded for this charge" rather than pretending otherwise. And a charge that
+begins while the watcher is down and every phone is asleep gets the same
+treatment — there is nothing to go back and read.
+
 ### Endpoints available but not surfaced in the UI
 
 `/position/{VIN}` and `/get_vehicles` are outside the design doc's scope, so the
@@ -813,6 +863,12 @@ lock's PIN or biometric enrolment — stay in that browser's own `localStorage`,
 since there is no single correct answer for those across a household (and a
 shared PIN would defeat the point of a *local* presence check).
 
+Where each charge started (`chargeLocations`) is shared for the same reason the
+tariff is: it is a fact about the car, not about the phone that happened to
+notice it — and the two things that record it, the server-side watcher and
+whichever phone had the app open, have to be appending to the same list. See
+[Where a charge happened](#where-a-charge-happened-is-not-in-the-bridges-data).
+
 Push subscriptions (see ["Charging notifications"](#what-it-does) above) are
 the one field here that is per-device data living in a shared blob rather than
 a household-wide preference: each phone's endpoint is unique to that phone,
@@ -880,6 +936,29 @@ Built and verified on Node 24.18.1 / npm 11.16.0.
   a bare figure, a dated history, a 404 from a bridge that predates it, and a
   value that cannot be a state of health — and the tile appears only in the two
   cases where the answer means something.
+- The charge-location matching was exercised against the rules it is built on
+  rather than assumed: a recording taken minutes into a session belongs to it, a
+  pair of back-to-back sessions each keep their own rather than claiming the
+  nearer one, a session with nothing near it resolves to no map, a recording
+  from after a charge finished is not that charge's, and a session the bridge
+  never dated matches nothing. The store's own rules were checked the same way —
+  coordinates rounded to about a metre, the same start seen twice by the watcher
+  and by a phone stored once, the same place a day later stored as a second
+  charge, and the oldest entries dropped at the cap. The watcher's half
+  (`python deploy/charge_notify.test.py`, 25 tests) covers the GeoJSON
+  `[lon, lat]` order, the `(0, 0)` no-fix sentinel, the same dedupe rules from
+  the Python side, and a settings store that refuses the write.
+- Both recorders were then driven end to end against the mock and a real
+  settings store, with the car plugged in and starting to charge between two
+  polls: the app writes one entry on the poll where it first sees the charge
+  and nothing on the ones either side of it, the watcher does the same from its
+  own loop, and a watcher polling minutes after a phone has already recorded
+  the same start writes nothing — which is the cross-writer case the dedupe
+  exists for.
+- The detail panel was driven in a real browser at 412px: a session with a
+  recording shows the map, its coordinates and the Maps link; one without shows
+  the empty slot; and the panel is the same height either way, so stepping from
+  one session to the next moves nothing below it.
 - The charge-type inference was driven from the rendered DOM rather than from
   the function: a car charging outside its window, one waiting outside it, one
   idle at its limit, one unplugged, one rapid-charging outside it, one charging

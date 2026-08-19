@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { fetchChargingSessions } from '../api/client'
 import { ApiError, type ChargingSession } from '../api/types'
+import { locationForSession } from '../chargeLocations'
 import { setFreeSession } from '../freeSessions'
+import { useChargeLocations } from '../hooks/useChargeLocations'
 import { useFreeSessions } from '../hooks/useFreeSessions'
 import { useTariff } from '../hooks/useTariff'
 import { startOfMonth } from '../periods'
 import { costOf, formatMoney, type Tariff } from '../tariff'
-import { ChartIcon } from './Icons'
+import { ChartIcon, PinIcon } from './Icons'
+import { MapTiles, mapsUrl } from './MapTiles'
 import { Widget, WidgetNote } from './Widget'
 
 /**
@@ -19,8 +22,11 @@ import { Widget, WidgetNote } from './Widget'
  * costing me" against the period a bill actually arrives for; the totals strip
  * answers "how much charging is it doing" over the window on screen; the plot
  * answers "and how is that distributed"; the panel under it answers "what
- * happened on that one day", but only once a session has been picked. Each one
- * is a step further in, and none of them repeats the one above it.
+ * happened on that one day" — including *where* it happened, which is the only
+ * part of a session the bridge does not record and the app has to have written
+ * down itself (see chargeLocations.ts) — but only once a session has been
+ * picked. Each one is a step further in, and none of them repeats the one
+ * above it.
  *
  * One series, so no legend: the heading says what is plotted. Values are
  * direct-labelled selectively (the largest session, and whichever is selected);
@@ -119,6 +125,7 @@ export function ChargingHistoryWidget() {
   const [range, setRange] = useState<Range>(10)
   const [asTable, setAsTable] = useState(false)
   const tariff = useTariff()
+  const chargeLocations = useChargeLocations()
   const freeStarts = useFreeSessions()
   const freeSet = new Set(freeStarts)
   const isFree = (session: ChargingSession) =>
@@ -188,6 +195,10 @@ export function ChargingHistoryWidget() {
   const priced = costs.filter((cost): cost is number => cost !== null)
   const spend = priced.reduce((sum, cost) => sum + cost, 0)
   const activeFree = active ? isFree(active) : false
+  // Where the car was standing for this one. Nothing the bridge knows — it is
+  // whatever was written down at the moment the charge began, so a session
+  // from before this app started recording has none and says so.
+  const activePlace = active ? locationForSession(active, chargeLocations) : null
   // The two-rate split for the selected session, so the panel can show where
   // the money went rather than just how much of it. Not for a free session —
   // there is no split to show.
@@ -578,6 +589,46 @@ export function ChargingHistoryWidget() {
                 {tariff.dayRate.toFixed(2)}p
               </p>
             )}
+            {/*
+              And where it happened, which is the question the figures above
+              cannot answer: 40 kWh at home and 40 kWh at a motorway services
+              are the same session on this chart and nothing alike in life.
+
+              The slot is the same size whether or not there is a position for
+              it, so moving from one session to the next never reflows the page
+              — the same fixed floor .history-detail already stands on. A
+              session with nothing recorded says so rather than being left
+              looking like a map that failed to load.
+            */}
+            <div className="history-map">
+              {activePlace ? (
+                <>
+                  <MapTiles
+                    lat={activePlace.lat}
+                    lon={activePlace.lon}
+                    className="is-compact"
+                  />
+                  <p className="history-map-note">
+                    <span>
+                      {activePlace.lat.toFixed(4)}, {activePlace.lon.toFixed(4)}
+                    </span>
+                    <a
+                      className="button is-small"
+                      href={mapsUrl(activePlace)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open in Maps
+                    </a>
+                  </p>
+                </>
+              ) : (
+                <p className="history-map-empty">
+                  <PinIcon />
+                  <span>No location recorded for this charge</span>
+                </p>
+              )}
+            </div>
           </>
         ) : (
           <span className="chart-hint">

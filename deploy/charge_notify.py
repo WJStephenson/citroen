@@ -33,13 +33,23 @@ signal that a phone stopped listening). Each entry in that list carries its
 own `events` object saying which of the two notifications that device wants;
 see wants_event for what a missing one means.
 
+It writes one other field there, `chargeLocations` — where the car was
+standing on the poll where a charge was first seen starting. That is the one
+thing about a session /vehicles/chargings does not record and nobody can
+recover afterwards, and this watcher is the only thing running at the moment
+it can be observed: the PWA's own recorder (src/hooks/useChargeLocationLog.ts)
+only sees the charges that begin while somebody has the app open, which
+overnight is none of them. See src/chargeLocations.ts, which owns the shape
+and reads it back into the charging history's detail panel.
+
 There are two notifications, each sent only to the devices that asked for it:
 
   - "charging started", on the poll where the status first becomes active
     having been seen inactive. A pure edge, so a watcher whose state file is
     missing does not announce a charge that began hours ago; the trade is
     that a car pausing and resuming mid-session announces itself twice,
-    which is at least true.
+    which is at least true. The same edge is what records where the car is
+    standing — see record_charge_location.
 
   - "charging finished", once per session, the first time the level reaches
     target while charging (or the car reports Finished outright — it can hit
@@ -128,6 +138,21 @@ DONE_STATUSES = {"finished"}
 # the test is written that way round: an unknown status must not read as
 # "unplugged" and fire a re-arm at a car that is sitting on a charger.
 UNPLUGGED_STATUS = "disconnected"
+# Where the car was, as recorded on the start edge. These three have to agree
+# with src/chargeLocations.ts, which reads the same list back and appends to it
+# from the app: both writers see the same charge start and neither can tell the
+# other's record from a second charge without them.
+#   - two recordings this close in time and this close in space are the same
+#     charge seen twice (0.0003 degrees is roughly 33m),
+#   - five decimal places is about a metre, which is finer than a parked car's
+#     GPS and finer than this needs,
+#   - and the list is carried in a blob every phone fetches at boot, so it is
+#     capped — well over a year of daily charging, oldest dropped first.
+LOCATION_DEDUPE_MS = 45 * 60 * 1000
+LOCATION_SAME_PLACE_DEGREES = 0.0003
+LOCATION_COORD_DP = 5
+MAX_CHARGE_LOCATIONS = 300
+
 # A re-arm that the bridge refuses, or that cannot be sent at all, is retried
 # on the following polls — a car unplugged and driven away is a car whose
 # radio may not answer for a minute. It is not retried forever: after this
@@ -205,9 +230,36 @@ def hour_from_duration(value: object) -> str | None:
     return f"{int(match[1] or 0):02d}:{int(match[2] or 0):02d}"
 
 
-def fetch_charging(vin: str) -> tuple[str | None, float | None, str | None]:
+def position_from_info(info: dict) -> tuple[float, float] | None:
     """
-    (status, level, stored delayed hour) from get_vehicleinfo, lowercased status.
+    (lat, lon) from last_position, or None if the car has never given a fix.
+
+    GeoJSON orders its coordinates [lon, lat, altitude] — the transposition
+    parseLocation in src/api/client.ts exists to keep in exactly one place.
+    This is the other one, and it makes the same two checks: a pair that is not
+    two numbers is not a position, and (0, 0) is the bridge's "no fix yet"
+    sentinel rather than a spot in the Gulf of Guinea.
+    """
+    geometry = (info.get("last_position") or {}).get("geometry") or {}
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        return None
+    lon, lat = coordinates[0], coordinates[1]
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lon, lat)):
+        return None
+    if lon == 0 and lat == 0:
+        return None
+    return (float(lat), float(lon))
+
+
+def fetch_charging(vin: str) -> tuple[str | None, float | None, str | None, tuple[float, float] | None]:
+    """
+    (status, level, stored delayed hour, position) from get_vehicleinfo,
+    lowercased status.
+
+    The position rides along on this read rather than getting one of its own:
+    the same payload already carries last_position, and it is only ever wanted
+    on a poll this call has just made anyway.
 
     Read WITHOUT from_cache, which it used to use. The cached read returns
     psa_car_controller's in-memory copy, and nothing refreshes that copy unless
@@ -226,7 +278,7 @@ def fetch_charging(vin: str) -> tuple[str | None, float | None, str | None]:
     """
     info = http_get(f"{PSACC_URL}/get_vehicleinfo/{vin}")
     if not isinstance(info, dict):
-        return (None, None, None)
+        return (None, None, None, None)
     energies = info.get("energy") or [{}]
     energy = next((e for e in energies if str(e.get("type", "")).lower() == "electric"), energies[0])
     charging = energy.get("charging") or {}
@@ -235,6 +287,7 @@ def fetch_charging(vin: str) -> tuple[str | None, float | None, str | None]:
         str(status).lower() if status else None,
         energy.get("level"),
         hour_from_duration(charging.get("next_delayed_time")),
+        position_from_info(info),
     )
 
 
@@ -327,6 +380,71 @@ def wants_event(subscription: dict, event: str) -> bool:
     return events.get(event) is True
 
 
+def parse_charge_locations(raw: object) -> list[dict]:
+    """
+    The stored list, keeping only entries that are actually three numbers.
+
+    Defensive for the same reason every client module is: the settings store
+    enforces no schema, and a field written by an older or newer version of the
+    app is not a reason for this loop to stop watching the car.
+    """
+    if not isinstance(raw, list):
+        return []
+    kept = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        values = (entry.get("at"), entry.get("lat"), entry.get("lon"))
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+            kept.append({"at": values[0], "lat": values[1], "lon": values[2]})
+    return sorted(kept, key=lambda record: record["at"])
+
+
+def record_charge_location(
+    settings: dict, position: tuple[float, float] | None, now_ms: int
+) -> None:
+    """
+    Writes down where the car is standing, as the charge it has just started.
+
+    This is the only moment the fact exists to be caught. /vehicles/chargings
+    has no position field, so a session whose start nobody was watching has no
+    place attached to it and never will — which is why the app's own detail
+    panel says "no location recorded" rather than treating it as an error.
+
+    Read-modify-write against a store that merges whole fields, so two writers
+    racing lose one entry. That is the right trade here: the other writer is a
+    phone that saw the same start (src/hooks/useChargeLocationLog.ts), the
+    entry it would have written is the one being written now, and the dedupe
+    below would have thrown one of them away regardless.
+    """
+    if position is None:
+        log("charge started but the car has reported no position — nothing to record")
+        return
+
+    lat = round(position[0], LOCATION_COORD_DP)
+    lon = round(position[1], LOCATION_COORD_DP)
+    records = parse_charge_locations(settings.get("chargeLocations"))
+    if any(
+        abs(record["at"] - now_ms) <= LOCATION_DEDUPE_MS
+        and abs(record["lat"] - lat) <= LOCATION_SAME_PLACE_DEGREES
+        and abs(record["lon"] - lon) <= LOCATION_SAME_PLACE_DEGREES
+        for record in records
+    ):
+        return
+
+    records = sorted([*records, {"at": now_ms, "lat": lat, "lon": lon}], key=lambda r: r["at"])
+    records = records[-MAX_CHARGE_LOCATIONS:]
+    try:
+        http_put(f"{SETTINGS_URL}/", {"chargeLocations": records})
+    except (urllib.error.URLError, TimeoutError):
+        # Not retried. By the next poll the car is still in the same place, but
+        # the start edge has passed and re-recording it then would date the
+        # entry to a moment that is no longer the start of anything.
+        log("could not store where this charge started — it will have no map")
+        return
+    log(f"charge started at {lat}, {lon}")
+
+
 def notify(subscriptions: list[dict], event: str, payload: dict) -> list[dict]:
     """
     Sends `payload` to every subscription that wants `event`, and returns the
@@ -368,7 +486,7 @@ def poll_once(state: dict) -> dict:
         # someone does.
         subscriptions = []
 
-    status, level, stored_hour = fetch_charging(vin)
+    status, level, stored_hour, position = fetch_charging(vin)
     target = fetch_target(vin)
 
     session = state.get(vin, {"notified": False, "last_level": None})
@@ -396,6 +514,10 @@ def poll_once(state: dict) -> dict:
 
     if started:
         log(f"{vin} started charging at {level}% (target {target}%, status {status})")
+        # Before the push, because this is the half that cannot be done later:
+        # a notification nobody was sent is a missed message, but a position
+        # nobody wrote down is a session that can never have one.
+        record_charge_location(settings, position, int(time.time() * 1000))
         subscriptions = notify(
             subscriptions,
             "start",

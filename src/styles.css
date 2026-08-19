@@ -2256,6 +2256,75 @@ button {
   background: linear-gradient(90deg, var(--series-deep), var(--series));
 }
 
+/*
+ * Where the selected charge happened, under the figures rather than beside
+ * them: it is the last and most specific thing the panel says, and a picture
+ * is the only honest way to say it.
+ *
+ * The slot keeps its height whether or not there is a position for it, so
+ * stepping from one session to the next never shifts the tiles below — the
+ * same reason .history-detail has a floor. The panel is taller with a session
+ * picked than without one, which is one step on the first tap rather than a
+ * shuffle on every one.
+ */
+.history-map {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  /* The slot's height is fixed here and shared out below, rather than each
+     state sizing itself: a map with a caption under it and a bare "nothing
+     recorded" panel are different amounts of content and would otherwise be
+     different heights, which is the reflow this is trying to avoid. Shorter
+     than the Location tile's map — this one is a supporting detail, not the
+     subject of its own tile. */
+  height: 132px;
+  margin-top: 0.1rem;
+}
+
+.map-frame.is-compact {
+  flex: 1;
+  height: auto;
+  margin-bottom: 0;
+}
+
+.history-map-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A charge from before anything was recording where the car was — every
+ * session in the history predates that, and no amount of asking the bridge
+ * will produce one. Drawn as an empty slot rather than as a broken map: the
+ * pin is the same mark the filled version carries, greyed, so it reads as
+ * "nothing was written here" instead of as tiles that failed to load.
+ */
+.history-map-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0;
+  border-radius: var(--radius);
+  background: var(--track);
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.history-map-empty svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+}
+
 .chart-skeleton {
   height: 132px;
   margin-top: 0.875rem;

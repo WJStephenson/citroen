@@ -26,6 +26,7 @@ import { wakeVehicle } from './api/client'
 import { EXPECTED_WAKE_SECONDS, STALE_AFTER_MINUTES, getVin } from './config'
 import { useAppLock } from './hooks/useAppLock'
 import { useBatteryHealth } from './hooks/useBatteryHealth'
+import { useChargeLocationLog } from './hooks/useChargeLocationLog'
 import { useCommands } from './hooks/useCommands'
 import { useOnline } from './hooks/useOnline'
 import { useVehicle } from './hooks/useVehicle'
@@ -65,6 +66,11 @@ export default function App() {
   const soh = useBatteryHealth(!lock.locked)
   const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
+  // Writes down where the car is on the poll where a charge is first seen
+  // starting — the charging history's one fact the bridge does not keep. See
+  // hooks/useChargeLocationLog; the server-side watcher does the same thing
+  // for every charge that begins with no app open, which is most of them.
+  useChargeLocationLog(vehicle.state, vehicle.fetchedAt)
 
   /**
    * A wake-up in flight, and the reading it is trying to replace.

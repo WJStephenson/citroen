@@ -287,6 +287,7 @@ export function normalise(raw: RawVehicleInfo, vin: string): VehicleState {
     vin: raw.vin ?? vin,
     battery: num(energy?.level),
     range: num(energy?.autonomy),
+    batteryCapacity: num(energy?.battery?.health?.capacity),
     charging: CHARGING_STATUS[charging?.status?.toLowerCase() ?? ''] ?? 'unknown',
     chargingMode: charging?.charging_mode ?? null,
     chargingRemainingMinutes: parseRemaining(charging?.remaining_time),

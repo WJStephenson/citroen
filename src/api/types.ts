@@ -24,6 +24,13 @@ export interface RawEnergy {
   autonomy?: number
   updated_at?: string
   charging?: RawCharging
+  battery?: {
+    capacity?: number
+    health?: {
+      capacity?: number
+      resistance?: number
+    }
+  }
 }
 
 export interface RawVehicleInfo {
@@ -73,6 +80,8 @@ export interface VehicleState {
   battery: number | null
   /** Remaining range in km. */
   range: number | null
+  /** Traction battery health (usable capacity retention, 0-100%). */
+  batteryCapacity: number | null
   charging: ChargingStatus
   /** Free-text mode from the bridge, e.g. "Slow" / "Quick". */
   chargingMode: string | null

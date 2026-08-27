@@ -63,7 +63,7 @@ export default function App() {
 
   // Telemetry only flows once the app is unlocked.
   const vehicle = useVehicle(!lock.locked)
-  const soh = useBatteryHealth(!lock.locked)
+  const soh = useBatteryHealth(!lock.locked, vehicle.state?.batteryCapacity)
   const online = useOnline()
   const commands = useCommands(vehicle.patch, vehicle.refresh, vehicle.state)
   // Writes down where the car is on the poll where a charge is first seen

@@ -136,11 +136,10 @@ export function TripHistoryWidget() {
       <Widget
         icon={<RouteIcon />}
         label="Trip history"
-        className="widget-trip-history"
+        className="widget-trip-history widget-history"
       >
-        {/* Filter Controls */}
-        <div className="trip-filters-bar">
-          <div className="trip-filter-group" role="group" aria-label="Time period">
+        <div className="widget-aside">
+          <div className="segmented is-mini is-triple" role="group" aria-label="Time period">
             <button
               type="button"
               className={`segment ${period === 'all' ? 'is-selected' : ''}`}
@@ -176,7 +175,7 @@ export function TripHistoryWidget() {
             </button>
           </div>
 
-          <div className="trip-filter-group" role="group" aria-label="Distance filter">
+          <div className="segmented is-mini is-triple" role="group" aria-label="Distance filter">
             <button
               type="button"
               className={`segment ${distanceMin === 'all' ? 'is-selected' : ''}`}
@@ -192,7 +191,7 @@ export function TripHistoryWidget() {
               type="button"
               className={`segment ${distanceMin === 'drive' ? 'is-selected' : ''}`}
               aria-pressed={distanceMin === 'drive'}
-              title="Hide short moves under 1 km / 0.6 mi"
+              title="Drives over 1 km"
               onClick={() => {
                 setDistanceMin('drive')
                 setVisibleCount(INITIAL_PAGE_SIZE)
@@ -204,7 +203,7 @@ export function TripHistoryWidget() {
               type="button"
               className={`segment ${distanceMin === 'long' ? 'is-selected' : ''}`}
               aria-pressed={distanceMin === 'long'}
-              title="Longer journeys over 10 km / 6 mi"
+              title="Drives over 10 km"
               onClick={() => {
                 setDistanceMin('long')
                 setVisibleCount(INITIAL_PAGE_SIZE)
@@ -214,6 +213,11 @@ export function TripHistoryWidget() {
             </button>
           </div>
         </div>
+
+        <WidgetNote>
+          Drives · {period === 'all' ? 'all' : period === 'month' ? 'this month' : 'this week'} ·{' '}
+          {filteredTrips.length} {filteredTrips.length === 1 ? 'trip' : 'trips'}
+        </WidgetNote>
 
         {/* State Banners: Loading, Failed, or Empty */}
         {loading && trips === null && (
@@ -237,31 +241,32 @@ export function TripHistoryWidget() {
           </div>
         )}
 
-        {/* Filter Summary Strip */}
+        {/* The headline figures, matching the Charging history tile's .history-stats */}
         {trips !== null && filteredTrips.length > 0 && (
-          <div className="trip-summary-strip">
-            <div className="trip-summary-item">
-              <span className="trip-summary-val">{summary.count}</span>
-              <span className="trip-summary-lbl">{summary.count === 1 ? 'trip' : 'trips'}</span>
+          <div className="history-stats">
+            <div className="history-stat">
+              <p className="history-stat-value">
+                {formatDistance(summary.totalKm, units.distance).split(' ')[0]}
+                <span>{units.distance}</span>
+              </p>
+              <p className="history-stat-label">Total distance</p>
             </div>
-            <div className="trip-summary-sep" />
-            <div className="trip-summary-item">
-              <span className="trip-summary-val">
-                {formatDistance(summary.totalKm, units.distance)}
-              </span>
-              <span className="trip-summary-lbl">total distance</span>
+            <div className="history-stat">
+              <p className="history-stat-value">
+                {summary.efficiency?.value ?? '—'}
+                {summary.efficiency && <span>{summary.efficiency.unit}</span>}
+              </p>
+              <p className="history-stat-label">
+                {summary.efficiency ? summary.efficiency.per : 'Efficiency'}
+              </p>
             </div>
-            {summary.efficiency && (
-              <>
-                <div className="trip-summary-sep" />
-                <div className="trip-summary-item">
-                  <span className="trip-summary-val">
-                    {summary.efficiency.value} {summary.efficiency.unit}
-                  </span>
-                  <span className="trip-summary-lbl">{summary.efficiency.per}</span>
-                </div>
-              </>
-            )}
+            <div className="history-stat">
+              <p className="history-stat-value">
+                {summary.totalEnergy > 0 ? summary.totalEnergy.toFixed(1) : '—'}
+                <span>kWh</span>
+              </p>
+              <p className="history-stat-label">Energy used</p>
+            </div>
           </div>
         )}
 
@@ -329,10 +334,6 @@ export function TripHistoryWidget() {
             </button>
           </div>
         )}
-
-        <WidgetNote>
-          {trips ? `${trips.length} drives recorded by vehicle telemetry` : undefined}
-        </WidgetNote>
       </Widget>
 
       {/* Detail Bottom Sheet Drawer */}

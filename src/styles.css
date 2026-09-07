@@ -511,7 +511,8 @@ button {
 /* The history tile's heading line carries two controls rather than a note and
    one — how far back, and how to draw it. They wrap rather than squeezing if a
    narrow phone cannot hold both on a line. */
-.widget-history .widget-aside {
+.widget-history .widget-aside,
+.widget-trip-history .widget-aside {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
@@ -576,7 +577,8 @@ button {
 }
 
 .widget-window,
-.widget-history {
+.widget-history,
+.widget-trip-history {
   border-radius: var(--corner-sm) var(--corner-sm) var(--corner-lg) var(--corner-lg);
 }
 
@@ -2843,56 +2845,9 @@ button {
   flex-direction: column;
 }
 
-.trip-filters-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.875rem;
-  flex-wrap: wrap;
-}
-
-.trip-filters-bar .segmented.is-mini {
-  flex: 1 1 auto;
-  min-width: 140px;
-}
-
-.trip-summary-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  background: var(--surface-2);
-  border-radius: var(--radius-sm, 12px);
-  padding: 0.625rem 0.875rem;
-  margin-bottom: 0.875rem;
-}
-
-.trip-summary-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.trip-summary-val {
-  font-size: 1.0625rem;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.2;
-}
-
-.trip-summary-lbl {
-  font-size: 0.6875rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-top: 0.125rem;
-}
-
-.trip-summary-sep {
-  width: 1px;
-  height: 1.5rem;
-  background: var(--border, rgba(255, 255, 255, 0.1));
+.widget-trip-history .history-stats {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .trip-list {

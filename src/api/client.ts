@@ -26,6 +26,7 @@ import {
   type RawTrip,
   type RawVehicleInfo,
   type Trip,
+  type TripPositions,
   type VehicleLocation,
   type VehicleState,
 } from './types'
@@ -526,10 +527,47 @@ export async function fetchTrips(): Promise<Trip[]> {
        * would weight a two-mile crawl the same as a motorway run.
        */
       const derived = distance === null ? null : ((num(trip.consumption_km) ?? 0) * distance) / 100
+
+      const rawPositions = trip.positions
+      let positions: TripPositions | null = null
+      if (
+        rawPositions &&
+        Array.isArray(rawPositions.lat) &&
+        Array.isArray(rawPositions.long) &&
+        rawPositions.lat.length > 0 &&
+        rawPositions.lat.length === rawPositions.long.length
+      ) {
+        const lats: number[] = []
+        const longs: number[] = []
+        for (let i = 0; i < rawPositions.lat.length; i++) {
+          const lat = rawPositions.lat[i]
+          const lon = rawPositions.long[i]
+          if (
+            typeof lat === 'number' &&
+            Number.isFinite(lat) &&
+            typeof lon === 'number' &&
+            Number.isFinite(lon)
+          ) {
+            lats.push(lat)
+            longs.push(lon)
+          }
+        }
+        if (lats.length > 0) {
+          positions = { lat: lats, long: longs }
+        }
+      }
+
       return {
+        id: typeof trip.id === 'number' ? trip.id : null,
         startedAt: started && !Number.isNaN(started.getTime()) ? started : null,
         distance,
+        durationMinutes: num(trip.duration),
+        speedAverage: num(trip.speed_average),
+        mileage: num(trip.mileage),
         energy: num(trip.consumption) ?? (derived || null),
+        consumptionKm: num(trip.consumption_km),
+        altitudeDiff: num(trip.altitude_diff),
+        positions,
       }
     })
     .filter((trip) => trip.startedAt !== null)

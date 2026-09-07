@@ -257,3 +257,22 @@ export function ChartIcon() {
     </svg>
   )
 }
+
+export function RouteIcon() {
+  return (
+    <svg {...light}>
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <path d="M6 15.5V9a3 3 0 0 1 3-3h6" />
+      <path d="M12 18h3a3 3 0 0 0 3-3V8.5" />
+    </svg>
+  )
+}
+
+export function ChevronRightIcon() {
+  return (
+    <svg {...light} strokeWidth={2}>
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  )
+}

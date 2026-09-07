@@ -163,6 +163,11 @@ export interface ChargingSession {
  * `positions` object holding the whole GPS track — but only the fields read
  * here are declared, rather than modelling the rest and ignoring it.
  */
+export interface RawTripPositions {
+  lat?: number[]
+  long?: number[]
+}
+
 export interface RawTrip {
   id?: number
   /**
@@ -173,6 +178,10 @@ export interface RawTrip {
   start_at?: string
   /** Distance covered by this trip, km. */
   distance?: number
+  /** Duration in minutes. */
+  duration?: number
+  /** Average speed in km/h. */
+  speed_average?: number
   /** The odometer at the end of the trip, km. */
   mileage?: number
   /** Energy used on this trip, kWh — Trip.get_info's `consumption`. */
@@ -183,14 +192,36 @@ export interface RawTrip {
    * across trips is not the same figure as summing energy and distance.
    */
   consumption_km?: number
+  /** Net altitude change, meters. */
+  altitude_diff?: number
+  /** Breadcrumb GPS track recorded by the vehicle. */
+  positions?: RawTripPositions
+}
+
+export interface TripPositions {
+  lat: number[]
+  long: number[]
 }
 
 export interface Trip {
+  id: number | null
   startedAt: Date | null
   /** km */
   distance: number | null
+  /** Duration in minutes. */
+  durationMinutes: number | null
+  /** Average speed in km/h. */
+  speedAverage: number | null
+  /** The odometer at the end of the trip, km. */
+  mileage: number | null
   /** Energy used, kWh. */
   energy: number | null
+  /** The bridge's calculated kWh/100km. */
+  consumptionKm: number | null
+  /** Net altitude difference, meters. */
+  altitudeDiff: number | null
+  /** Full GPS route coordinates. */
+  positions: TripPositions | null
 }
 
 export type CommandKind =

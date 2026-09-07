@@ -108,3 +108,36 @@ export function formatEfficiency(
 export function isPlausibleAuxVoltage(volts: number | null): boolean {
   return volts !== null && volts >= 10 && volts <= 15.5
 }
+
+export function formatTripDistance(km: number | null, unit: DistanceUnit): string {
+  if (km === null) return '—'
+  const value = unit === 'mi' ? km / KM_PER_MILE : km
+  return `${value.toFixed(1)} ${unit}`
+}
+
+export function formatSpeed(kmh: number | null, unit: DistanceUnit): string {
+  if (kmh === null || kmh <= 0) return '—'
+  const value = unit === 'mi' ? kmh / KM_PER_MILE : kmh
+  return `${Math.round(value)} ${unit === 'mi' ? 'mph' : 'km/h'}`
+}
+
+export function formatTripDuration(minutes: number | null): string {
+  if (minutes === null || minutes <= 0) return '—'
+  const total = Math.round(minutes)
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  if (h === 0) return `${m} min`
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+export function formatAltitude(meters: number | null, unit: DistanceUnit): string {
+  if (meters === null) return '—'
+  const sign = meters > 0 ? '+' : meters < 0 ? '-' : ''
+  const abs = Math.abs(meters)
+  if (unit === 'mi') {
+    const feet = Math.round(abs * 3.28084)
+    return `${sign}${feet} ft`
+  }
+  return `${sign}${Math.round(abs)} m`
+}
+

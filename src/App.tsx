@@ -3,6 +3,7 @@ import { SHARED_SETTINGS_CHANGED } from './api/sharedSettings'
 import { ChargeLimitWidget } from './components/ChargeLimitWidget'
 import { ChargeWindowWidget } from './components/ChargeWindowWidget'
 import { ChargingHistoryWidget } from './components/ChargingHistoryWidget'
+import { TripHistoryWidget } from './components/TripHistoryWidget'
 import { CarHero } from './components/CarHero'
 import { CommandOverlay } from './components/CommandOverlay'
 import { HornWidget, LightsWidget } from './components/FindCarWidgets'
@@ -240,13 +241,9 @@ export default function App() {
         ...(isPlausibleAuxVoltage(state.auxVoltage)
           ? [{ id: 'aux', label: '12V battery', node: <AuxWidget volts={state.auxVoltage} /> }]
           : []),
-        {
-          id: 'chargeWindow',
-          label: 'Charging window',
-          span: 2,
-          node: <ChargeWindowWidget commands={commands} state={state} />,
-        },
+        { id: 'chargeWindow', label: 'Charging window', span: 2, node: <ChargeWindowWidget commands={commands} state={state} /> },
         { id: 'history', label: 'Charging history', span: 2, node: <ChargingHistoryWidget /> },
+        { id: 'trips', label: 'Trip history', span: 2, node: <TripHistoryWidget /> },
       ]
     : []
 
